@@ -28,8 +28,12 @@ export function isSecretName(name: string): name is SecretName {
 export const SETTINGS = {
   /** The chatbot's model. Haiku keeps per-conversation cost low; change here, no deploy. */
   "chatbot.model": "claude-haiku-5-5",
+  /** A cost guard: answers per 24 hours across all chats. Past it, people are offered a ticket instead. */
+  "chatbot.daily_limit": "1500",
   /** The model used for one-off ingestion work (drafting KB articles from history). */
   "ingestion.model": "claude-haiku-5-5",
+  /** Voyage AI embedding model for knowledge-base search (1024 dimensions). */
+  "voyage.model": "voyage-4-lite",
   "zoho.accounts_domain": "https://accounts.zoho.eu",
   "zoho.api_domain": "https://www.zohoapis.eu",
   "turnstile.site_key": "",

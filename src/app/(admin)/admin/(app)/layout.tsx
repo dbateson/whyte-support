@@ -10,6 +10,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const nav = {
     tickets: staff.can("tickets.view"),
     kb: staff.can("kb.view"),
+    kbEdit: staff.can("kb.edit"),
     chat: staff.can("chat.view"),
     analytics: staff.can("analytics.view"),
     settings: staff.can("settings.manage"),

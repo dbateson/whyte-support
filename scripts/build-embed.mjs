@@ -45,9 +45,7 @@ const cssPlugin = {
   },
 };
 
-await build({
-  entryPoints: [join(root, "src/embed/support-form.tsx")],
-  outfile: join(out, "support-form.js"),
+const common = {
   bundle: true,
   format: "iife",
   minify: true,
@@ -58,5 +56,14 @@ await build({
   plugins: [cssPlugin],
   legalComments: "none",
   logLevel: "warning",
-});
-console.log("build-embed: wrote public/embed/support-form.js");
+};
+const entries = {
+  "support-form": "src/embed/support-form.tsx",
+  // A small loader, and the chat it fetches once the host page is idle.
+  "support-chat": "src/embed/support-chat.ts",
+  "support-chat-app": "src/embed/support-chat-app.tsx",
+};
+for (const [name, entry] of Object.entries(entries)) {
+  await build({ ...common, entryPoints: [join(root, entry)], outfile: join(out, `${name}.js`) });
+}
+console.log(`build-embed: wrote ${Object.keys(entries).map((n) => `public/embed/${n}.js`).join(", ")}`);

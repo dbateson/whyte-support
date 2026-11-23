@@ -9,6 +9,7 @@ import logo from "@whyte/design-system/logos/whyte-lockup-horizontal.svg";
 export interface NavVisibility {
   tickets: boolean;
   kb: boolean;
+  kbEdit: boolean;
   chat: boolean;
   analytics: boolean;
   settings: boolean;
@@ -17,7 +18,10 @@ export interface NavVisibility {
 }
 
 function isCurrent(pathname: string, href: string) {
-  return href === "/admin" ? pathname === "/admin" : pathname === href || pathname.startsWith(`${href}/`);
+  if (href === "/admin") return pathname === "/admin";
+  // Articles is the knowledge base's list and its article pages, not its other sub-pages.
+  if (href === "/admin/kb") return pathname === "/admin/kb" || pathname.startsWith("/admin/kb/articles");
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 /** The side menu: only the sections the signed-in person's roles allow. */
@@ -45,7 +49,16 @@ export function AdminNav({
   const sections = [
     { href: "/admin", label: "Overview" },
     show.tickets && { href: "/admin/tickets", label: "Tickets" },
-    show.kb && { href: "/admin/kb", label: "Knowledge base" },
+    show.kb && {
+      href: "/admin/kb/section",
+      label: "Knowledge base",
+      children: [
+        { href: "/admin/kb", label: "Articles" },
+        { href: "/admin/kb/review", label: "Review" },
+        { href: "/admin/kb/search", label: "Test search" },
+        ...(show.kbEdit ? [{ href: "/admin/kb/import", label: "Import" }] : []),
+      ],
+    },
     show.chat && { href: "/admin/chat", label: "Chatbot" },
     show.analytics && { href: "/admin/analytics", label: "Analytics" },
     settings.length > 0 && { href: "/admin/settings", label: "Settings", children: settings },

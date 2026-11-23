@@ -51,7 +51,10 @@ Claude for the chatbot (`claude-haiku-5-5` by default, a setting, not code).
 - **No credentials in URLs** (they end up in history and request logs). One-time links are
   emailed or shown once in a form response (`ActionState.reveal`).
 - **Chatbot answers** must come only from published KB article versions, and every answer
-  stores the article versions it cited.
+  stores the article versions it cited. Retrieval is `searchKb` (src/lib/kb/queries.ts): published
+  passages only, filtered by audience.
+- **Imported text is untrusted.** Redact it (src/lib/ingest/redact.ts) before storing or sending it
+  to a model, and keep model output structured (Zod schemas) and reviewed by staff before use.
 - **GDPR:** customer personal data never goes into logs, KB articles or analytics exports.
   Anything that stores personal data needs a retention rule.
 
@@ -99,3 +102,13 @@ encrypted store.
 - Branch from `main`, open a pull request; CI (lint, typecheck, tests against Postgres with
   pgvector, build) must pass. Don't skip or disable tests.
 - Small, imperative commits ("Add ticket queue filters").
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

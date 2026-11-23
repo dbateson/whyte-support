@@ -307,3 +307,220 @@ export const rateLimitEvents = pgTable(
   },
   (t) => [index("rate_limit_events_idx").on(t.bucket, t.key, t.at)],
 );
+
+/* ============================================================
+   Phase 3: knowledge base and ingestion.
+   ============================================================ */
+
+const vector1024 = customType<{ data: number[]; driverData: string }>({
+  dataType: () => "vector(1024)",
+  toDriver: (v) => `[${v.join(",")}]`,
+  fromDriver: (v) => (typeof v === "string" ? JSON.parse(v) : (v as number[])),
+});
+
+/** B2C, B2B, or both: who an article is for. The chatbot only reads what matches the visitor. */
+export const KB_AUDIENCES = ["b2c", "b2b", "both"] as const;
+export type KbAudience = (typeof KB_AUDIENCES)[number];
+
+/** An article. Its text lives in versions; `publishedVersionId` is what the chatbot reads. */
+export const kbArticles = pgTable(
+  "kb_articles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    audience: text("audience", { enum: KB_AUDIENCES }).notNull(),
+    category: text("category"),
+    /** Live version (null until first published). */
+    publishedVersionId: uuid("published_version_id"),
+    /** The version being worked on (draft or in review), if any. */
+    workingVersionId: uuid("working_version_id"),
+    origin: text("origin", { enum: ["manual", "ingestion", "ticket"] }).notNull().default("manual"),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("kb_articles_audience_idx").on(t.audience, t.retiredAt)],
+);
+
+export const KB_VERSION_STATUSES = ["draft", "in_review", "published", "superseded", "rejected"] as const;
+export type KbVersionStatus = (typeof KB_VERSION_STATUSES)[number];
+
+/** Every version of an article, never edited once published, so citations point at exact text. */
+export const kbArticleVersions = pgTable(
+  "kb_article_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    articleId: uuid("article_id").notNull().references(() => kbArticles.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    title: text("title").notNull(),
+    /** Markdown. */
+    body: text("body").notNull(),
+    status: text("status", { enum: KB_VERSION_STATUSES }).notNull().default("draft"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    /** "Claude (from 6 support emails)" for drafts the pipeline wrote. */
+    authorLabel: text("author_label").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    reviewedBy: uuid("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewNote: text("review_note"),
+  },
+  (t) => [uniqueIndex("kb_article_versions_number_key").on(t.articleId, t.number), index("kb_article_versions_status_idx").on(t.status)],
+);
+
+/** Passages of published versions, for search and the chatbot. Rebuilt on publish. */
+export const kbChunks = pgTable(
+  "kb_chunks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    articleId: uuid("article_id").notNull().references(() => kbArticles.id, { onDelete: "cascade" }),
+    versionId: uuid("version_id").notNull().references(() => kbArticleVersions.id, { onDelete: "cascade" }),
+    audience: text("audience", { enum: KB_AUDIENCES }).notNull(),
+    position: integer("position").notNull(),
+    heading: text("heading").notNull(),
+    content: text("content").notNull(),
+    searchVector: tsvector("search_vector"),
+    embedding: vector1024("embedding"),
+    embeddingModel: text("embedding_model"),
+  },
+  (t) => [index("kb_chunks_search_idx").using("gin", t.searchVector), index("kb_chunks_article_idx").on(t.articleId)],
+);
+
+/** Where an article's content came from: a ticket, an email, a Zoho case, a web page. */
+export const kbSources = pgTable(
+  "kb_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    articleId: uuid("article_id").notNull().references(() => kbArticles.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["ticket", "email", "zoho_case", "web"] }).notNull(),
+    /** Ticket number, email Message-ID, Zoho case number or URL. */
+    reference: text("reference").notNull(),
+    title: text("title"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("kb_sources_article_idx").on(t.articleId)],
+);
+
+export const INGEST_KINDS = ["mbox", "eml", "zoho_csv", "web", "ticket"] as const;
+
+/** One import: a file of emails, a Zoho export, a website crawl, or resolved tickets. */
+export const ingestJobs = pgTable("ingest_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind", { enum: INGEST_KINDS }).notNull(),
+  /** queued → importing (reading the source) → extracting → drafting → done. */
+  status: text("status", { enum: ["importing", "extracting", "drafting", "done", "failed", "cancelled"] }).notNull().default("importing"),
+  label: text("label").notNull(),
+  /** Which audience to assume when an item doesn't say. */
+  defaultAudience: text("default_audience", { enum: KB_AUDIENCES }).notNull().default("b2c"),
+  /** Source location and the reader's progress (file key and byte offset, URL list position). */
+  params: jsonb("params").notNull().default({}),
+  stats: jsonb("stats").notNull().default({}),
+  error: text("error"),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+});
+
+/**
+ * One source document (an email thread, a case, a page) after personal data
+ * is removed. Extraction adds a question and answer and a topic; drafting
+ * groups items by topic into articles. Unused items are deleted after 90 days.
+ */
+export const ingestItems = pgTable(
+  "ingest_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id").references(() => ingestJobs.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: INGEST_KINDS }).notNull(),
+    /** Message-ID, case number, URL or ticket number: an item is imported once. */
+    externalId: text("external_id").notNull(),
+    title: text("title").notNull().default(""),
+    /** Redacted text. Never contains raw contact details. */
+    content: text("content").notNull(),
+    status: text("status", { enum: ["pending", "extracted", "skipped", "drafted", "failed"] }).notNull().default("pending"),
+    audience: text("audience", { enum: KB_AUDIENCES }),
+    topic: text("topic"),
+    extraction: jsonb("extraction"),
+    articleId: uuid("article_id").references(() => kbArticles.id, { onDelete: "set null" }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ingest_items_external_key").on(t.kind, t.externalId),
+    index("ingest_items_job_status_idx").on(t.jobId, t.status),
+    index("ingest_items_topic_idx").on(t.status, t.topic),
+  ],
+);
+
+/* ============================================================
+   Phase 4: the chatbot.
+   ============================================================ */
+
+/** One visitor's conversation. The browser holds a random token; only its hash is stored. */
+export const chatSessions = pgTable(
+  "chat_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tokenHash: text("token_hash").notNull(),
+    segment: text("segment", { enum: SEGMENTS }).notNull(),
+    /** Set when a signed-in Shopify dealer was verified; the segment then can't be changed. */
+    shopifyCustomerId: text("shopify_customer_id"),
+    /** Where it started: the support site, or a page that embeds the widget. */
+    origin: text("origin").notNull().default(""),
+    status: text("status", { enum: ["open", "escalated", "closed"] }).notNull().default("open"),
+    ticketId: uuid("ticket_id").references(() => tickets.id, { onDelete: "set null" }),
+    /** Bike model, frame number and order number the customer mentioned: pre-fill the ticket if they escalate. */
+    details: jsonb("details").notNull().default({}),
+    messageCount: integer("message_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("chat_sessions_created_idx").on(t.createdAt), index("chat_sessions_status_idx").on(t.status, t.lastMessageAt)],
+);
+
+export const CHAT_OUTCOMES = ["answered", "partial", "no_answer", "needs_human", "declined", "error"] as const;
+export type ChatOutcome = (typeof CHAT_OUTCOMES)[number];
+
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id").notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["user", "assistant"] }).notNull(),
+    content: text("content").notNull(),
+    /** Assistant replies: how the turn ended. */
+    outcome: text("outcome", { enum: CHAT_OUTCOMES }),
+    model: text("model"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    latencyMs: integer("latency_ms"),
+    /** The visitor's thumbs up (1) or down (-1). */
+    feedback: integer("feedback"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("chat_messages_session_idx").on(t.sessionId, t.createdAt), index("chat_messages_outcome_idx").on(t.outcome, t.createdAt)],
+);
+
+/**
+ * Every passage the model was given for an answer, as it read at the time,
+ * and whether the answer cited it. Versions are immutable, so the article
+ * version id and this text pin exactly what the answer was based on.
+ */
+export const chatAnswerSources = pgTable(
+  "chat_answer_sources",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    messageId: uuid("message_id").notNull().references(() => chatMessages.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id").references(() => kbArticles.id, { onDelete: "set null" }),
+    versionId: uuid("version_id").references(() => kbArticleVersions.id, { onDelete: "set null" }),
+    heading: text("heading").notNull(),
+    content: text("content").notNull(),
+    rank: integer("rank").notNull(),
+    score: text("score"),
+    cited: boolean("cited").notNull(),
+  },
+  (t) => [index("chat_answer_sources_message_idx").on(t.messageId), index("chat_answer_sources_article_idx").on(t.articleId)],
+);

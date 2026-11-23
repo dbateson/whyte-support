@@ -8,6 +8,7 @@ import { isPermission } from "@/lib/auth/permissions";
 import { requireStaff } from "@/lib/auth/session";
 import { createInviteLink, deleteRole, inviteUser, resetUserMfa, saveRole, setUserDisabled, setUserRoles } from "@/lib/auth/users";
 import { testEmailConnection } from "@/lib/email/postmark";
+import { testVoyageConnection } from "@/lib/kb/embeddings";
 import { SETTINGS, isSecretName, type SettingKey } from "@/lib/integrations";
 import { log } from "@/lib/logger";
 import { baseUrl } from "@/lib/request";
@@ -47,6 +48,8 @@ export async function testConnectionAction(_: ActionState, data: FormData): Prom
         return { notice: await testAnthropicConnection(await getSetting("chatbot.model")) };
       case "email":
         return { notice: await testEmailConnection() };
+      case "voyage":
+        return { notice: await testVoyageConnection() };
       default:
         return { error: "There's no test for this yet." };
     }
@@ -80,6 +83,7 @@ export async function saveGeneralAction(_: ActionState, data: FormData): Promise
   for (const key of ["email.from_address", "email.inbound_address"] as const) {
     if (values[key] && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(values[key]!)) return { error: "Check the email addresses: one doesn't look right." };
   }
+  if (values["chatbot.daily_limit"] !== undefined && !/^\d{1,7}$/.test(values["chatbot.daily_limit"])) return { error: "Answers per day should be a whole number (0 for no limit)." };
   await saveSettings(values, { id: staff.id, label: staff.name });
   revalidatePath("/admin/settings/general");
   return { notice: "Saved." };

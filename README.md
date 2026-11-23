@@ -33,8 +33,8 @@ Settings → Integrations. They are never put in `.env`.
 | 0 | Foundations: scaffold, design system, database, encrypted secrets store, CI (done) |
 | 1 | Ticketing core, staff auth and roles, settings screen, email (done) |
 | 2 | Public support form (web component and Shopify App Proxy) (done) |
-| 3 | Knowledge base and ingestion (emails, Zoho, whytebikes.com) |
-| 4 | Chatbot and Shopify embed |
+| 3 | Knowledge base and ingestion (emails, Zoho, whytebikes.com) (done) |
+| 4 | Chatbot and Shopify embed (done) |
 | 5 | Zoho CRM two-way sync |
 | 6 | Analytics dashboard |
 | 7 | GDPR tooling and hardening |
@@ -64,8 +64,61 @@ Two ways, both using the same form and API:
   ```
   The page's origin must be in Settings → General → Allowed sites.
 
+## Chatbot
+
+- Answers only from published knowledge-base articles: each question is searched, the top six
+  passages go to Claude (Settings → General → Chatbot → Model, Haiku by default), and the reply must
+  cite at least one of them. A reply without a valid citation is replaced with "I can't find that"
+  and an offer to pass the question on. Every reply is stored with every passage it was given
+  (article version, rank, score, cited or not): Chatbot → a conversation shows them.
+- Switched on once the Anthropic key is saved (Integrations). A daily answer limit (General,
+  default 1,500) caps cost; past it, people are offered a ticket. Per-chat and per-connection rate
+  limits and Turnstile (when set up) apply too.
+- "Send this to the team" makes a ticket (source *chat*) with the transcript, the articles used and
+  any bike, frame or order number the customer mentioned. The rider or dealer phone number
+  (General) is offered as a second way to reach someone.
+- Answers link to `/help/<article>` for rider articles; dealer-only articles are never public.
+- Conversations are deleted 12 months after the last message (the nightly job); a ticket made
+  from one keeps its own copy.
+
+**On whytebikes.com**, one line in the theme (e.g. before `</body>` in `theme.liquid`):
+
+```html
+<script src="https://<support site>/embed/support-chat.js" defer></script>
+```
+
+The loader is under 1 KB and fetches the chat once the page is idle. To recognise signed-in
+dealers, add an element with the App Proxy identity path (needs the App Proxy and Admin API token
+from the form setup):
+
+```html
+<whyte-support-chat identity-url="/apps/support/identity" contact-url="/apps/support"></whyte-support-chat>
+```
+
+The store's origin must be in Settings → General → Allowed sites.
+
 ## Scheduled jobs
 
 `vercel.json` runs `/api/cron/cleanup` nightly (abandoned uploads, expired sessions and links,
-old rate-limit rows). Set a `CRON_SECRET` environment variable in Vercel; the route refuses
+old rate-limit rows, chats older than 12 months; it also advances imports and embeds new
+articles). Set a `CRON_SECRET` environment variable in Vercel; the route refuses
 requests without it.
+
+## Knowledge base
+
+- **Articles** are for riders (B2C), dealers (B2B) or both. Every edit is a new version; the chatbot
+  reads only the published one. Editors send drafts for review; approvers publish or send them back.
+- **Import** (Knowledge base → Import) turns history into draft articles:
+  - *Past support emails*: an `.mbox` export (or `.eml` files). Give Whyte's email domains so
+    replies are told apart from customers.
+  - *Zoho CRM cases*: Cases → Export as CSV.
+  - *whytebikes.com*: reads the sitemap (pages, products, blog posts).
+  Personal details are removed before anything is stored or sent to Claude, uploaded files are
+  deleted once read, and unused imported text is deleted after 90 days. A topic answered at least
+  twice becomes one draft. Drafts list anything the sources didn't settle; delete that section
+  before publishing.
+- **Resolved tickets** are queued automatically; "Draft an article from this ticket" does one now.
+- **Search** is full text, plus meaning when a Voyage AI key is set (Integrations). Knowledge base →
+  Test search shows which passages the chatbot would be given for a question.
+- Uploads over 50 MB need Supabase's project upload limit raised (Storage → Settings), or the
+  export split into smaller files.

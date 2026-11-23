@@ -4,12 +4,18 @@ import { log } from "@/lib/logger";
 import { selfOrigin } from "@/lib/public/cors";
 import { purgeRateLimits } from "@/lib/rate-limit";
 import { purgePendingUploads } from "@/lib/storage/attachments";
+import { advanceAll, purgeStaleIngestItems } from "@/lib/ingest/pipeline";
+import { embedMissing } from "@/lib/kb/service";
+import { purgeOldChats } from "@/lib/chat/engine";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 /**
- * Nightly housekeeping (vercel.json crons): abandoned uploads, expired
- * sessions and links, old rate-limit rows. Vercel sends CRON_SECRET as a
+ * Nightly job (vercel.json crons): advances unfinished imports, embeds new
+ * knowledge-base passages, and tidies up abandoned uploads, expired sessions
+ * and links, old rate-limit rows, unused imported text (90 days) and chat
+ * conversations idle for 12 months (escalated ones live on in their ticket). Vercel sends CRON_SECRET as a
  * bearer token; without that variable set, the route refuses everyone.
  */
 export async function GET(req: Request) {
@@ -25,6 +31,14 @@ export async function GET(req: Request) {
   }
   await purgeExpiredAuth();
   await purgeRateLimits();
+  await purgeStaleIngestItems();
+  result.chats = await purgeOldChats();
+  try {
+    result.imports = await advanceAll(selfOrigin(req), 200_000);
+    result.embedded = await embedMissing();
+  } catch (err) {
+    log.error("Nightly: imports or embeddings failed", { err });
+  }
   log.info("Cleanup done", result);
   return Response.json({ ok: true, ...result });
 }

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import { PageHeader, Stack, TopBar } from "@whyte/design-system";
 import logo from "@whyte/design-system/logos/whyte-lockup-horizontal.svg";
+import { ChatApp } from "@/components/chat/ChatApp";
 import { SupportForm } from "@/components/support-form/SupportForm";
 
 export const metadata: Metadata = {
@@ -21,6 +22,7 @@ export default function SupportHome() {
           </Stack>
         </div>
       </main>
+      <ChatApp />
     </Stack>
   );
 }
