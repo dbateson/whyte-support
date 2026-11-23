@@ -64,6 +64,16 @@ export async function saveGeneralAction(_: ActionState, data: FormData): Promise
   for (const key of Object.keys(SETTINGS) as SettingKey[]) {
     if (data.has(key)) values[key] = str(data, key).slice(0, 500);
   }
+  for (const key of ["storage.supabase_url"] as const) {
+    if (values[key] && !/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/.test(values[key]!)) return { error: "The Supabase URL should look like https://abcd.supabase.co" };
+  }
+  if (values["embed.allowed_origins"]) {
+    const bad = values["embed.allowed_origins"].split(",").map((o) => o.trim()).filter((o) => o && !/^https?:\/\/[^\s/]+$/.test(o));
+    if (bad.length) return { error: `These aren't site addresses (like https://www.whytebikes.com, no path): ${bad.join(", ")}` };
+  }
+  if (values["shopify.shop_domain"] && !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(values["shopify.shop_domain"]!)) {
+    return { error: "The shop domain should be the .myshopify.com one, e.g. whyte-bikes.myshopify.com" };
+  }
   for (const key of ["app.public_url"] as const) {
     if (values[key] && !/^https?:\/\/[^\s/]+$/.test(values[key]!.replace(/\/$/, ""))) return { error: "The site address should look like https://support.whytebikes.com" };
   }

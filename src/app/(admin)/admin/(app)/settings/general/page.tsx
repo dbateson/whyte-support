@@ -61,6 +61,21 @@ export default async function GeneralSettingsPage() {
               </Select>
             </Stack>
           </Panel>
+          <Panel title="Storage" description="Where customers' photos and documents are kept: a private Supabase Storage bucket.">
+            <TextField label="Supabase project URL" name="storage.supabase_url" type="url" defaultValue={s["storage.supabase_url"]} placeholder="https://abcd.supabase.co" help="Its secret key goes in Integrations → File storage." />
+          </Panel>
+          <Panel title="Support form on other sites">
+            <Stack gap="small">
+              <TextField label="Allowed sites" name="embed.allowed_origins" defaultValue={s["embed.allowed_origins"]} help="Sites that can show the form and chat, comma-separated, e.g. https://www.whytebikes.com" />
+              <TextField label="Privacy policy link" name="support.privacy_url" type="url" defaultValue={s["support.privacy_url"]} />
+            </Stack>
+          </Panel>
+          <Panel title="Shopify" description="For the App Proxy page (whytebikes.com/apps/support) and recognising dealers.">
+            <Stack gap="small">
+              <TextField label="Shop domain" name="shopify.shop_domain" defaultValue={s["shopify.shop_domain"]} placeholder="whyte-bikes.myshopify.com" />
+              <TextField label="Dealer customer tag" name="shopify.b2b_tag" defaultValue={s["shopify.b2b_tag"]} help="Signed-in customers with this tag are treated as B2B." />
+            </Stack>
+          </Panel>
           <Panel title="Spam protection">
             <TextField label="Turnstile site key" name="turnstile.site_key" defaultValue={s["turnstile.site_key"]} help="The public key from Cloudflare. Its secret key goes in Integrations." />
           </Panel>
