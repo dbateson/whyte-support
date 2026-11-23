@@ -36,6 +36,14 @@ export const SETTINGS = {
   "voyage.model": "voyage-4-lite",
   "zoho.accounts_domain": "https://accounts.zoho.eu",
   "zoho.api_domain": "https://www.zohoapis.eu",
+  /** "true" once Zoho is connected and sync is switched on (Settings → Zoho). Read by the outbox trigger. */
+  "zoho.sync_enabled": "false",
+  /** Our ticket status → Zoho Case Status, one per line "status=Zoho value". Checked against Zoho's picklist. */
+  "zoho.status_map": "new=New\nopen=New\npending_customer=On Hold\npending_internal=Escalated\nresolved=Closed\nclosed=Closed",
+  /** Our priority → Zoho Case Priority. */
+  "zoho.priority_map": "low=Low\nnormal=Medium\nhigh=High\nurgent=High",
+  /** Zoho Account types that count as dealers, comma-separated. Blank: every account is a dealer. */
+  "zoho.dealer_account_types": "",
   "turnstile.site_key": "",
   "support.phone.b2c": "",
   "support.phone.b2b": "",

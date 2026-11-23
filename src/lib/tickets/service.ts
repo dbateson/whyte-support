@@ -6,6 +6,8 @@ import type { Segment, TicketPriority, TicketSource, TicketStatus } from "../db/
 import { mailboxKey, messageIdFor, replyToAddress } from "../email/addresses";
 import { EmailNotConfiguredError, EmailSendError, sendEmail } from "../email/postmark";
 import { enqueueTicket } from "../ingest/pipeline";
+import { matchDealerAccount } from "../zoho/dealers";
+import { kickOutbox } from "../zoho/push";
 import { log } from "../logger";
 import { getSettings } from "../settings";
 import { PRIORITY_LABELS, ref, SEGMENT_LABELS, STATUS_LABELS } from "./format";
@@ -45,15 +47,22 @@ export async function findOrCreateContact(
       if (input.shopifyCustomerId && existing.shopifyCustomerId !== input.shopifyCustomerId) patch.shopifyCustomerId = input.shopifyCustomerId;
       // A verified Shopify dealer account settles the segment; a typed-in choice never changes it.
       if (input.shopifyCustomerId && input.segment === "b2b" && existing.segment !== "b2b") patch.segment = "b2b";
+      // A dealer recognised from Zoho's accounts (account number or email domain).
+      if (!existing.accountId && input.segment === "b2b") {
+        const account = await matchDealerAccount(tx, { accountCode: input.accountCode ?? existing.accountCode, email });
+        if (account) patch.accountId = account.id;
+      }
       if (Object.keys(patch).length) {
         await tx.update(schema.contacts).set({ ...patch, updatedAt: new Date() }).where(eq(schema.contacts.id, existing.id));
       }
       return { ...existing, ...patch };
     }
   }
+  const account = input.segment === "b2b" ? await matchDealerAccount(tx, { accountCode: input.accountCode, email }) : null;
   const [created] = await tx
     .insert(schema.contacts)
     .values({
+      accountId: account?.id ?? null,
       email,
       name: input.name ?? "",
       phone: input.phone ?? null,
@@ -101,7 +110,7 @@ export async function createTicket(input: NewTicket, actor: Actor): Promise<Tick
 
 /** As createTicket, also returning the first message (attachments hang off it). */
 export async function createTicketWithMessage(input: NewTicket, actor: Actor): Promise<{ ticket: Ticket; message: TicketMessage }> {
-  return db().transaction(async (tx) => {
+  const created = await db().transaction(async (tx) => {
     const contact = await findOrCreateContact(tx, { ...input.contact, segment: input.segment });
     const now = new Date();
     const [ticket] = await tx
@@ -139,6 +148,8 @@ export async function createTicketWithMessage(input: NewTicket, actor: Actor): P
     const [fresh] = await tx.select().from(schema.tickets).where(eq(schema.tickets.id, ticket!.id));
     return { ticket: fresh!, message: message! };
   });
+  kickOutbox();
+  return created;
 }
 
 export type TicketChanges = Partial<{
@@ -202,6 +213,7 @@ export async function updateTicket(ticket: Ticket, changes: TicketChanges, actor
   if (changes.status === "resolved" && ticket.status !== "resolved") {
     await enqueueTicket(ticket.id).catch((err) => log.warn("Couldn't queue a resolved ticket for the knowledge base", { err, ticket: ticket.number }));
   }
+  kickOutbox();
   return result;
 }
 
@@ -240,6 +252,7 @@ export async function addStaffMessage(
   if (input.statusAfter && input.statusAfter !== ticket.status) {
     await updateTicket(ticket, { status: input.statusAfter }, actor);
   }
+  kickOutbox();
   if (!outbound) return { message };
   const emailError = await deliverStaffMessage(ticket, message);
   return { message, emailError };
@@ -308,5 +321,6 @@ export async function addCustomerMessage(
   } else if (ticket.status === "pending_customer") {
     await updateTicket(ticket, { status: "open" }, system);
   }
+  kickOutbox();
   return message;
 }

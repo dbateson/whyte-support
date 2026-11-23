@@ -13,7 +13,7 @@ const ABOUT: Record<string, { description: string; test?: string }> = {
   Anthropic: { description: "Claude, which powers the chatbot and drafts knowledge-base articles from imports.", test: "anthropic" },
   "File storage": { description: "Supabase Storage for customers' attachments and knowledge-base imports. Its URL is in General." },
   "Voyage AI": { description: "Embeddings, so knowledge-base search matches on meaning as well as words. Optional.", test: "voyage" },
-  "Zoho CRM": { description: "Two-way sync of contacts and cases (Phase 5). From a Zoho server-based client." },
+  "Zoho CRM": { description: "Two-way sync of contacts, dealer accounts and cases. Save the API client here, then connect in Settings → Zoho CRM. The refresh and notification tokens are filled in by connecting." },
   Email: { description: "Postmark: ticket replies out, customer replies in.", test: "email" },
   Shopify: { description: "The support form and chatbot on whytebikes.com (Phases 2 and 4)." },
   "Cloudflare Turnstile": { description: "Spam protection on the public form and chat (Phase 2)." },

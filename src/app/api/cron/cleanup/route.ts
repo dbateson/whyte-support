@@ -7,6 +7,7 @@ import { purgePendingUploads } from "@/lib/storage/attachments";
 import { advanceAll, purgeStaleIngestItems } from "@/lib/ingest/pipeline";
 import { embedMissing } from "@/lib/kb/service";
 import { purgeOldChats } from "@/lib/chat/engine";
+import { purgeSyncLog } from "@/lib/zoho/sync";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -33,6 +34,7 @@ export async function GET(req: Request) {
   await purgeRateLimits();
   await purgeStaleIngestItems();
   result.chats = await purgeOldChats();
+  await purgeSyncLog();
   try {
     result.imports = await advanceAll(selfOrigin(req), 200_000);
     result.embedded = await embedMissing();

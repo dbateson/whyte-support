@@ -148,9 +148,10 @@ export async function queueCounts(viewer: { id: string; segments: Segment[] }) {
 
 export async function getTicketByNumber(number: number) {
   const [row] = await db()
-    .select({ ticket: schema.tickets, contact: schema.contacts })
+    .select({ ticket: schema.tickets, contact: schema.contacts, account: schema.accounts })
     .from(schema.tickets)
     .leftJoin(schema.contacts, eq(schema.contacts.id, schema.tickets.contactId))
+    .leftJoin(schema.accounts, eq(schema.accounts.id, schema.contacts.accountId))
     .where(eq(schema.tickets.number, number));
   return row ?? null;
 }

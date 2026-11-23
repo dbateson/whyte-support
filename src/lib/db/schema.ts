@@ -14,6 +14,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -166,6 +167,8 @@ export const contacts = pgTable(
     /** Dealers: the business name. */
     companyName: text("company_name"),
     zohoContactId: text("zoho_contact_id"),
+    /** The dealer account this person belongs to: from Zoho, or matched from their account number. */
+    accountId: uuid("account_id").references((): AnyPgColumn => accounts.id, { onDelete: "set null" }),
     /** Dealers: their Whyte trade account number, as they gave it. */
     accountCode: text("account_code"),
     /** Set when the contact was identified through a signed-in Shopify session. */
@@ -175,7 +178,11 @@ export const contacts = pgTable(
     /** Set when erased on request (GDPR): personal fields are blanked, statistics kept. */
     anonymisedAt: timestamp("anonymised_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("contacts_email_key").on(t.email).where(sql`${t.email} is not null`)],
+  (t) => [
+    uniqueIndex("contacts_email_key").on(t.email).where(sql`${t.email} is not null`),
+    uniqueIndex("contacts_zoho_key").on(t.zohoContactId).where(sql`${t.zohoContactId} is not null`),
+    index("contacts_account_idx").on(t.accountId),
+  ],
 );
 
 export const TICKET_STATUSES = ["new", "open", "pending_customer", "pending_internal", "resolved", "closed"] as const;
@@ -206,6 +213,10 @@ export const tickets = pgTable(
     purchasedFrom: text("purchased_from"),
     orderNumber: text("order_number"),
     zohoCaseId: text("zoho_case_id"),
+    /** Zoho's case number, shown to staff. */
+    zohoCaseNumber: text("zoho_case_number"),
+    /** Hash of the fields last sent to (or matched in) Zoho: skips no-op updates and spots our own echoes. */
+    zohoHash: text("zoho_hash"),
     /** Random; part of the reply-to address so inbound replies find their ticket. */
     replyToken: text("reply_token").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -222,6 +233,7 @@ export const tickets = pgTable(
     index("tickets_assignee_idx").on(t.assigneeId, t.status),
     index("tickets_contact_idx").on(t.contactId),
     index("tickets_search_idx").using("gin", t.searchVector),
+    uniqueIndex("tickets_zoho_key").on(t.zohoCaseId).where(sql`${t.zohoCaseId} is not null`),
   ],
 );
 
@@ -246,13 +258,19 @@ export const ticketMessages = pgTable(
     emailMessageId: text("email_message_id"),
     emailStatus: text("email_status", { enum: ["sending", "sent", "failed"] }),
     emailError: text("email_error"),
+    /** The Zoho note this message was copied to, or came from. */
+    zohoNoteId: text("zoho_note_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("ticket_messages_ticket_idx").on(t.ticketId, t.createdAt),
+    uniqueIndex("ticket_messages_zoho_key").on(t.zohoNoteId).where(sql`${t.zohoNoteId} is not null`),
     uniqueIndex("ticket_messages_email_id_key").on(t.emailMessageId).where(sql`${t.emailMessageId} is not null`),
   ],
 );
+
+/** "zoho": a change made in Zoho to a field this app owns, noted but not applied. */
+export const TICKET_EVENT_TYPES = ["created", "status", "priority", "assignee", "segment", "category", "reopened", "zoho"] as const;
 
 /** Changes to a ticket, shown between its messages. */
 export const ticketEvents = pgTable(
@@ -262,7 +280,7 @@ export const ticketEvents = pgTable(
     ticketId: uuid("ticket_id").notNull().references(() => tickets.id, { onDelete: "cascade" }),
     actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
     actorLabel: text("actor_label").notNull(),
-    type: text("type", { enum: ["created", "status", "priority", "assignee", "segment", "category", "reopened"] }).notNull(),
+    type: text("type", { enum: TICKET_EVENT_TYPES }).notNull(),
     fromValue: text("from_value"),
     toValue: text("to_value"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -523,4 +541,86 @@ export const chatAnswerSources = pgTable(
     cited: boolean("cited").notNull(),
   },
   (t) => [index("chat_answer_sources_message_idx").on(t.messageId), index("chat_answer_sources_article_idx").on(t.articleId)],
+);
+
+/* ============================================================
+   Phase 5: Zoho CRM sync.
+   ============================================================ */
+
+/**
+ * Dealer (B2B) accounts, mirrored from Zoho Accounts. Zoho owns them: this
+ * app never edits one, it only reads them to recognise dealers.
+ */
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    zohoAccountId: text("zoho_account_id").notNull().unique(),
+    name: text("name").notNull(),
+    accountNumber: text("account_number"),
+    accountType: text("account_type"),
+    website: text("website"),
+    /** From the website, lower case ("rideshop.co.uk"), to recognise dealers' email addresses. */
+    emailDomain: text("email_domain"),
+    phone: text("phone"),
+    /** Whether this account counts as a dealer, from its type (Settings → Zoho). */
+    isDealer: boolean("is_dealer").notNull().default(true),
+    zohoModifiedAt: timestamp("zoho_modified_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("accounts_number_idx").on(sql`lower(${t.accountNumber})`), index("accounts_domain_idx").on(t.emailDomain)],
+);
+
+export const SYNC_ENTITIES = ["contact", "ticket"] as const;
+export type SyncEntity = (typeof SYNC_ENTITIES)[number];
+
+/**
+ * Changes waiting to go to Zoho. A database trigger writes a "ticket" row in
+ * the same transaction as any change to a ticket's synced fields or a new
+ * message, so no code path can miss one; changes that came from Zoho are
+ * skipped (the sync sets app.sync_origin = 'zoho'). One row per record: a
+ * second change before sending bumps `changedAt`. Sent straight after the
+ * request, and retried by the cron.
+ */
+export const syncOutbox = pgTable(
+  "sync_outbox",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    entity: text("entity", { enum: SYNC_ENTITIES }).notNull(),
+    entityId: uuid("entity_id").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Set while a worker holds it, so two workers don't send the same change. */
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Bumped by each new change, so a send that raced a change doesn't drop it. */
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("sync_outbox_entity_key").on(t.entity, t.entityId), index("sync_outbox_due_idx").on(t.nextAttemptAt)],
+);
+
+/** Small pieces of sync state: per-module "modified since" cursors, the notification channel, the history import. */
+export const syncState = pgTable("sync_state", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** What the sync did, for the health page. Kept for 30 days. */
+export const syncLog = pgTable(
+  "sync_log",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    direction: text("direction", { enum: ["out", "in"] }).notNull(),
+    level: text("level", { enum: ["info", "warning", "error"] }).notNull().default("info"),
+    /** contact, ticket, message, account, or the job ("reconcile", "history"). */
+    entity: text("entity").notNull(),
+    entityId: text("entity_id"),
+    zohoId: text("zoho_id"),
+    message: text("message").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("sync_log_at_idx").on(t.at), index("sync_log_level_idx").on(t.level, t.at)],
 );

@@ -35,7 +35,7 @@ Settings → Integrations. They are never put in `.env`.
 | 2 | Public support form (web component and Shopify App Proxy) (done) |
 | 3 | Knowledge base and ingestion (emails, Zoho, whytebikes.com) (done) |
 | 4 | Chatbot and Shopify embed (done) |
-| 5 | Zoho CRM two-way sync |
+| 5 | Zoho CRM two-way sync (done) |
 | 6 | Analytics dashboard |
 | 7 | GDPR tooling and hardening |
 
@@ -97,9 +97,40 @@ from the form setup):
 
 The store's origin must be in Settings → General → Allowed sites.
 
+## Zoho CRM
+
+**Connecting:** in Zoho's API console (api-console.zoho.eu for EU accounts), add a
+*Server-based Application* with the redirect address `https://<support site>/api/zoho/callback`.
+Save its client ID and secret in Settings → Integrations → Zoho CRM. Then go to
+Settings → Zoho CRM → Connect Zoho, and approve. The refresh token is stored encrypted.
+Check the setup, then switch sync on.
+
+**What goes where:**
+
+| This app | Zoho | Who owns it |
+| --- | --- | --- |
+| Ticket | Case (subject, status, priority, origin, contact, account; description on creation) | This app |
+| Message | Note on the case (internal notes too, titled as such) | This app |
+| Contact | Contact (found by email, created if missing, never overwritten) | Zoho |
+| Dealer | Account (mirrored; used to recognise dealers by account number or email domain) | Zoho |
+
+- A change to a field this app owns, made in Zoho (a case closed there), is noted on the ticket and
+  put back. Notes added in Zoho arrive as internal notes. Cases created in Zoho become tickets.
+- Contact details edited in Zoho update contacts this app already has. Zoho contacts with no tickets
+  here are not copied in. Erased contacts are never refilled.
+- **Sending:** a database trigger queues each ticket change in the same transaction (`sync_outbox`),
+  so nothing is missed. It's sent straight after the request; failures are retried with backoff and
+  listed on the Zoho page.
+- **Receiving:** Zoho notifications (renewed automatically, up to a week at a time) plus a check
+  every 15 minutes (`/api/cron/zoho`) for anything modified since the last run.
+- **History:** "Import past cases" brings every past case and its notes in as tickets, in the
+  background.
+- Status and priority mappings are editable on the Zoho page and checked against Zoho's picklists.
+- Records deleted in Zoho are not deleted here; the sync log shows a warning.
+
 ## Scheduled jobs
 
-`vercel.json` runs `/api/cron/cleanup` nightly (abandoned uploads, expired sessions and links,
+`vercel.json` runs `/api/cron/zoho` every 15 minutes (Zoho sync) and `/api/cron/cleanup` nightly (abandoned uploads, expired sessions and links,
 old rate-limit rows, chats older than 12 months; it also advances imports and embeds new
 articles). Set a `CRON_SECRET` environment variable in Vercel; the route refuses
 requests without it.
