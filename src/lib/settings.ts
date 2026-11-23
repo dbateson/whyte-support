@@ -8,7 +8,9 @@ import type { Actor } from "./secrets";
 export async function getSettings<K extends SettingKey>(keys: readonly K[]): Promise<Record<K, string>> {
   const rows = await db().select().from(schema.appSettings).where(inArray(schema.appSettings.key, keys as unknown as string[]));
   const saved = new Map(rows.map((r) => [r.key, r.value]));
-  return Object.fromEntries(keys.map((k) => [k, typeof saved.get(k) === "string" ? (saved.get(k) as string) : SETTINGS[k]])) as Record<K, string>;
+  // Values are saved as JSON strings, but the driver re-parses ones that look like JSON ("1500" comes back as 1500).
+  const read = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : undefined);
+  return Object.fromEntries(keys.map((k) => [k, read(saved.get(k)) ?? SETTINGS[k]])) as Record<K, string>;
 }
 
 export async function getSetting(key: SettingKey): Promise<string> {

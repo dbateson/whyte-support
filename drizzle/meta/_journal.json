@@ -78,6 +78,27 @@
       "when": 1795448270254,
       "tag": "0010_knowledge_base_extras",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795450607734,
+      "tag": "0011_chatbot",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795450608463,
+      "tag": "0012_chatbot_extras",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795450698272,
+      "tag": "0013_chat_details",
+      "breakpoints": true
     }
   ]
 }

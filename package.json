@@ -22,7 +22,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.12.0",
     "@supabase/storage-js": "^2.119.2",
-    "@whyte/design-system": "file:vendor/whyte-design-system-0.22.0-51c3a7f.tgz",
+    "@whyte/design-system": "file:vendor/whyte-design-system-0.23.0-acc8b33.tgz",
     "csv-parse": "^6.2.1",
     "drizzle-orm": "^0.45.4",
     "next": "^16.4.6",

@@ -45,6 +45,15 @@ export default async function GeneralSettingsPage() {
                   <option key={m.id} value={m.id}>{m.label}</option>
                 ))}
               </Select>
+              <TextField
+                label="Answers per day (cost limit)"
+                name="chatbot.daily_limit"
+                type="number"
+                min={0}
+                step={1}
+                defaultValue={s["chatbot.daily_limit"]}
+                help="Across all chats in 24 hours. Past it, people are offered a ticket instead. 0 for no limit."
+              />
               <TextField label="Phone number for riders (B2C)" name="support.phone.b2c" type="tel" defaultValue={s["support.phone.b2c"]} help="Offered when the chatbot can't help. Leave blank to offer only a ticket." />
               <TextField label="Phone number for dealers (B2B)" name="support.phone.b2b" type="tel" defaultValue={s["support.phone.b2b"]} />
             </Stack>

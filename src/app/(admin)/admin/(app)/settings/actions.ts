@@ -83,6 +83,7 @@ export async function saveGeneralAction(_: ActionState, data: FormData): Promise
   for (const key of ["email.from_address", "email.inbound_address"] as const) {
     if (values[key] && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(values[key]!)) return { error: "Check the email addresses: one doesn't look right." };
   }
+  if (values["chatbot.daily_limit"] !== undefined && !/^\d{1,7}$/.test(values["chatbot.daily_limit"])) return { error: "Answers per day should be a whole number (0 for no limit)." };
   await saveSettings(values, { id: staff.id, label: staff.name });
   revalidatePath("/admin/settings/general");
   return { notice: "Saved." };

@@ -22,6 +22,13 @@ export async function GET(req: Request) {
   if (!secret) return new Response("The Shopify app isn't set up", { status: 503 });
   if (!verifyProxySignature(params, secret) || !proxyTimestampFresh(params)) return new Response("Forbidden", { status: 403 });
 
+  // whytebikes.com/apps/support/identity: who is signed in, for the chat on any store page.
+  if (new URL(req.url).pathname.replace(/\/$/, "").endsWith("/identity")) {
+    const id = params.get("logged_in_customer_id") ?? "";
+    const t = /^\d{1,20}$/.test(id) ? issueCustomerToken(id, customerTokenKey()) : null;
+    return Response.json({ token: t }, { headers: { "cache-control": "private, no-store" } });
+  }
+
   const s = await getSettings(["shopify.b2b_tag"]);
   const origin = selfOrigin(req);
   const customerId = params.get("logged_in_customer_id") ?? "";

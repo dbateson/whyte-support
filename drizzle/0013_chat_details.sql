@@ -1,0 +1,1 @@
+ALTER TABLE "chat_sessions" ADD COLUMN "details" jsonb DEFAULT '{}'::jsonb NOT NULL;

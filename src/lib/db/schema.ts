@@ -454,3 +454,73 @@ export const ingestItems = pgTable(
     index("ingest_items_topic_idx").on(t.status, t.topic),
   ],
 );
+
+/* ============================================================
+   Phase 4: the chatbot.
+   ============================================================ */
+
+/** One visitor's conversation. The browser holds a random token; only its hash is stored. */
+export const chatSessions = pgTable(
+  "chat_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tokenHash: text("token_hash").notNull(),
+    segment: text("segment", { enum: SEGMENTS }).notNull(),
+    /** Set when a signed-in Shopify dealer was verified; the segment then can't be changed. */
+    shopifyCustomerId: text("shopify_customer_id"),
+    /** Where it started: the support site, or a page that embeds the widget. */
+    origin: text("origin").notNull().default(""),
+    status: text("status", { enum: ["open", "escalated", "closed"] }).notNull().default("open"),
+    ticketId: uuid("ticket_id").references(() => tickets.id, { onDelete: "set null" }),
+    /** Bike model, frame number and order number the customer mentioned: pre-fill the ticket if they escalate. */
+    details: jsonb("details").notNull().default({}),
+    messageCount: integer("message_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("chat_sessions_created_idx").on(t.createdAt), index("chat_sessions_status_idx").on(t.status, t.lastMessageAt)],
+);
+
+export const CHAT_OUTCOMES = ["answered", "partial", "no_answer", "needs_human", "declined", "error"] as const;
+export type ChatOutcome = (typeof CHAT_OUTCOMES)[number];
+
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id").notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["user", "assistant"] }).notNull(),
+    content: text("content").notNull(),
+    /** Assistant replies: how the turn ended. */
+    outcome: text("outcome", { enum: CHAT_OUTCOMES }),
+    model: text("model"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    latencyMs: integer("latency_ms"),
+    /** The visitor's thumbs up (1) or down (-1). */
+    feedback: integer("feedback"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("chat_messages_session_idx").on(t.sessionId, t.createdAt), index("chat_messages_outcome_idx").on(t.outcome, t.createdAt)],
+);
+
+/**
+ * Every passage the model was given for an answer, as it read at the time,
+ * and whether the answer cited it. Versions are immutable, so the article
+ * version id and this text pin exactly what the answer was based on.
+ */
+export const chatAnswerSources = pgTable(
+  "chat_answer_sources",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    messageId: uuid("message_id").notNull().references(() => chatMessages.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id").references(() => kbArticles.id, { onDelete: "set null" }),
+    versionId: uuid("version_id").references(() => kbArticleVersions.id, { onDelete: "set null" }),
+    heading: text("heading").notNull(),
+    content: text("content").notNull(),
+    rank: integer("rank").notNull(),
+    score: text("score"),
+    cited: boolean("cited").notNull(),
+  },
+  (t) => [index("chat_answer_sources_message_idx").on(t.messageId), index("chat_answer_sources_article_idx").on(t.articleId)],
+);
