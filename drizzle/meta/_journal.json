@@ -29,6 +29,27 @@
       "when": 1795440335245,
       "tag": "0003_extensions_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795440703811,
+      "tag": "0004_staff_and_tickets",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795440731415,
+      "tag": "0005_tickets_search_and_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795441007228,
+      "tag": "0006_totp_replay",
+      "breakpoints": true
     }
   ]
 }

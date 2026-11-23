@@ -34,6 +34,16 @@ export const SETTINGS = {
   "turnstile.site_key": "",
   "support.phone.b2c": "",
   "support.phone.b2b": "",
+  /** Where links in emails point: the support site's address, e.g. https://support.whytebikes.com. */
+  "app.public_url": "",
+  /** Sender for ticket emails; the domain must be verified with the email provider. */
+  "email.from_address": "",
+  "email.from_name": "Whyte Bikes Support",
+  /**
+   * The provider's inbound address (Postmark: <hash>@inbound.postmarkapp.com). Replies go to
+   * <hash>+<ticket key>@..., so they land on the right ticket.
+   */
+  "email.inbound_address": "",
 } as const satisfies Record<string, string>;
 
 export type SettingKey = keyof typeof SETTINGS;
