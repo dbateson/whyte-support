@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/build-embed.mjs && next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -16,10 +16,12 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --experimental-strip-types scripts/migrate.ts",
-    "admin:create": "node --experimental-strip-types scripts/create-admin.ts"
+    "admin:create": "node --experimental-strip-types scripts/create-admin.ts",
+    "build:embed": "node scripts/build-embed.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.12.0",
+    "@supabase/storage-js": "^2.119.2",
     "@whyte/design-system": "file:vendor/whyte-design-system-0.22.0.tgz",
     "drizzle-orm": "^0.45.4",
     "next": "^16.4.6",
@@ -36,6 +38,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "drizzle-kit": "^0.31.11",
+    "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.6",
     "typescript": "^5.9.3",

@@ -22,7 +22,15 @@ export type TicketMessage = typeof schema.ticketMessages.$inferSelect;
 /** Finds a contact by email, or creates one. Fills in a missing name, phone or company. */
 export async function findOrCreateContact(
   tx: Tx | Db,
-  input: { email?: string | null; name?: string; phone?: string | null; segment: Segment; companyName?: string | null },
+  input: {
+    email?: string | null;
+    name?: string;
+    phone?: string | null;
+    segment: Segment;
+    companyName?: string | null;
+    accountCode?: string | null;
+    shopifyCustomerId?: string | null;
+  },
 ) {
   const email = input.email?.trim().toLowerCase() || null;
   if (email) {
@@ -32,6 +40,10 @@ export async function findOrCreateContact(
       if (!existing.name && input.name) patch.name = input.name;
       if (!existing.phone && input.phone) patch.phone = input.phone;
       if (!existing.companyName && input.companyName) patch.companyName = input.companyName;
+      if (!existing.accountCode && input.accountCode) patch.accountCode = input.accountCode;
+      if (input.shopifyCustomerId && existing.shopifyCustomerId !== input.shopifyCustomerId) patch.shopifyCustomerId = input.shopifyCustomerId;
+      // A verified Shopify dealer account settles the segment; a typed-in choice never changes it.
+      if (input.shopifyCustomerId && input.segment === "b2b" && existing.segment !== "b2b") patch.segment = "b2b";
       if (Object.keys(patch).length) {
         await tx.update(schema.contacts).set({ ...patch, updatedAt: new Date() }).where(eq(schema.contacts.id, existing.id));
       }
@@ -40,7 +52,15 @@ export async function findOrCreateContact(
   }
   const [created] = await tx
     .insert(schema.contacts)
-    .values({ email, name: input.name ?? "", phone: input.phone ?? null, segment: input.segment, companyName: input.companyName ?? null })
+    .values({
+      email,
+      name: input.name ?? "",
+      phone: input.phone ?? null,
+      segment: input.segment,
+      companyName: input.companyName ?? null,
+      accountCode: input.accountCode ?? null,
+      shopifyCustomerId: input.shopifyCustomerId ?? null,
+    })
     .returning();
   return created!;
 }
@@ -52,10 +72,19 @@ export interface NewTicket {
   source: TicketSource;
   category?: string | null;
   priority?: TicketPriority;
-  contact: { email?: string | null; name?: string; phone?: string | null; companyName?: string | null };
+  contact: {
+    email?: string | null;
+    name?: string;
+    phone?: string | null;
+    companyName?: string | null;
+    accountCode?: string | null;
+    shopifyCustomerId?: string | null;
+  };
   productModel?: string | null;
   frameNumber?: string | null;
   purchaseDate?: string | null;
+  purchasedFrom?: string | null;
+  orderNumber?: string | null;
   assigneeId?: string | null;
   /** Who wrote the first message: the customer (form, email) or staff logging a call. */
   firstMessageFrom: "customer" | "agent";
@@ -66,6 +95,11 @@ export interface NewTicket {
 }
 
 export async function createTicket(input: NewTicket, actor: Actor): Promise<Ticket> {
+  return (await createTicketWithMessage(input, actor)).ticket;
+}
+
+/** As createTicket, also returning the first message (attachments hang off it). */
+export async function createTicketWithMessage(input: NewTicket, actor: Actor): Promise<{ ticket: Ticket; message: TicketMessage }> {
   return db().transaction(async (tx) => {
     const contact = await findOrCreateContact(tx, { ...input.contact, segment: input.segment });
     const now = new Date();
@@ -82,11 +116,15 @@ export async function createTicket(input: NewTicket, actor: Actor): Promise<Tick
         productModel: input.productModel ?? null,
         frameNumber: input.frameNumber ?? null,
         purchaseDate: input.purchaseDate ?? null,
+        purchasedFrom: input.purchasedFrom ?? null,
+        orderNumber: input.orderNumber ?? null,
         replyToken: randomBytes(12).toString("base64url"),
         lastCustomerMessageAt: input.firstMessageFrom === "customer" ? now : null,
       })
       .returning();
-    await tx.insert(schema.ticketMessages).values({
+    const [message] = await tx
+      .insert(schema.ticketMessages)
+      .values({
       ticketId: ticket!.id,
       authorType: input.firstMessageFrom,
       authorUserId: input.firstMessageFrom === "agent" ? (actor.id ?? null) : null,
@@ -94,10 +132,11 @@ export async function createTicket(input: NewTicket, actor: Actor): Promise<Tick
       body: input.body.trim(),
       channel: input.channel,
       emailMessageId: input.emailMessageId ?? null,
-    });
+    })
+      .returning();
     await tx.insert(schema.ticketEvents).values({ ticketId: ticket!.id, actorUserId: actor.id ?? null, actorLabel: actor.label, type: "created", toValue: input.source });
     const [fresh] = await tx.select().from(schema.tickets).where(eq(schema.tickets.id, ticket!.id));
-    return fresh!;
+    return { ticket: fresh!, message: message! };
   });
 }
 

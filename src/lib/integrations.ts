@@ -15,6 +15,7 @@ export const SECRETS = {
   "shopify.api_secret": { integration: "Shopify", label: "App API secret (verifies App Proxy requests)" },
   "shopify.admin_token": { integration: "Shopify", label: "Admin API access token" },
   "turnstile.secret_key": { integration: "Cloudflare Turnstile", label: "Secret key" },
+  "storage.service_key": { integration: "File storage", label: "Supabase secret key (server only)" },
 } as const;
 
 export type SecretName = keyof typeof SECRETS;
@@ -44,6 +45,16 @@ export const SETTINGS = {
    * <hash>+<ticket key>@..., so they land on the right ticket.
    */
   "email.inbound_address": "",
+  /** Supabase project URL for file storage (attachments), e.g. https://abcd.supabase.co */
+  "storage.supabase_url": "",
+  /** Sites allowed to embed the form and chat, comma-separated origins. */
+  "embed.allowed_origins": "https://www.whytebikes.com,https://whytebikes.com",
+  /** The shop's myshopify.com domain, which signs App Proxy requests. */
+  "shopify.shop_domain": "",
+  /** Shopify customer tag that marks a dealer (B2B) account. */
+  "shopify.b2b_tag": "trade",
+  /** Linked from the form's privacy line. */
+  "support.privacy_url": "https://whytebikes.com/policies/privacy-policy",
 } as const satisfies Record<string, string>;
 
 export type SettingKey = keyof typeof SETTINGS;

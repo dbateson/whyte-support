@@ -166,6 +166,10 @@ export const contacts = pgTable(
     /** Dealers: the business name. */
     companyName: text("company_name"),
     zohoContactId: text("zoho_contact_id"),
+    /** Dealers: their Whyte trade account number, as they gave it. */
+    accountCode: text("account_code"),
+    /** Set when the contact was identified through a signed-in Shopify session. */
+    shopifyCustomerId: text("shopify_customer_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     /** Set when erased on request (GDPR): personal fields are blanked, statistics kept. */
@@ -198,6 +202,9 @@ export const tickets = pgTable(
     productModel: text("product_model"),
     frameNumber: text("frame_number"),
     purchaseDate: date("purchase_date"),
+    /** Where the bike was bought: a dealer's name, or whytebikes.com. */
+    purchasedFrom: text("purchased_from"),
+    orderNumber: text("order_number"),
     zohoCaseId: text("zoho_case_id"),
     /** Random; part of the reply-to address so inbound replies find their ticket. */
     replyToken: text("reply_token").notNull(),
@@ -261,4 +268,42 @@ export const ticketEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("ticket_events_ticket_idx").on(t.ticketId, t.createdAt)],
+);
+
+/**
+ * Files customers attach (photos, receipts). Stored in private object
+ * storage; a row starts "pending" when an upload slot is issued, and becomes
+ * "attached" when the form that uploaded it is submitted. Pending rows older
+ * than a day are deleted with their objects.
+ */
+export const ticketAttachments = pgTable(
+  "ticket_attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ticketId: uuid("ticket_id").references(() => tickets.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id").references(() => ticketMessages.id, { onDelete: "set null" }),
+    /** The object's path in the bucket. Never shown to customers. */
+    storageKey: text("storage_key").notNull().unique(),
+    fileName: text("file_name").notNull(),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    status: text("status", { enum: ["pending", "attached"] }).notNull().default("pending"),
+    /** SHA-256 of the submission key the uploader holds; only that submission can attach it. */
+    claimHash: text("claim_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    attachedAt: timestamp("attached_at", { withTimezone: true }),
+  },
+  (t) => [index("ticket_attachments_ticket_idx").on(t.ticketId), index("ticket_attachments_pending_idx").on(t.status, t.createdAt)],
+);
+
+/** Hits on public endpoints, for rate limits. Keys are hashes. Rows older than a day are purged. */
+export const rateLimitEvents = pgTable(
+  "rate_limit_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    bucket: text("bucket").notNull(),
+    key: text("key").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("rate_limit_events_idx").on(t.bucket, t.key, t.at)],
 );

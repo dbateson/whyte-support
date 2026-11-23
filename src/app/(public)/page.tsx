@@ -1,13 +1,26 @@
-import { EmptyState } from "@whyte/design-system";
+import type { Metadata } from "next";
+import Image from "next/image";
+import { PageHeader, Stack, TopBar } from "@whyte/design-system";
+import logo from "@whyte/design-system/logos/whyte-lockup-horizontal.svg";
+import { SupportForm } from "@/components/support-form/SupportForm";
 
-// The support form arrives in Phase 2. The brand page frame (site header and
-// footer) is a design-system gap; until it exists this page stays bare.
+export const metadata: Metadata = {
+  title: "Contact support",
+  description: "Warranty claims, technical help, orders and dealer enquiries for Whyte Bikes.",
+};
+
 export default function SupportHome() {
   return (
-    <main>
-      <EmptyState title="Whyte Bikes support" headingLevel={2}>
-        Our support form is coming soon.
-      </EmptyState>
-    </main>
+    <Stack gap="large">
+      <TopBar brand={<Image src={logo} alt="Whyte" width={140} height={32} priority />} product="Support" />
+      <main className="ds-container">
+        <div className="ds-width-8">
+          <Stack gap="large">
+            <PageHeader title="How can we help?" description="Tell us what's going on and we'll reply by email. Warranty claims, technical questions, orders and dealer enquiries all start here." />
+            <SupportForm />
+          </Stack>
+        </div>
+      </main>
+    </Stack>
   );
 }

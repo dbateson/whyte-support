@@ -4,6 +4,7 @@ import {
   Alert,
   Badge,
   Breadcrumb,
+  ChatAttachment,
   Button,
   CardGrid,
   DescriptionList,
@@ -25,6 +26,7 @@ import { requireStaff } from "@/lib/auth/session";
 import { TICKET_PRIORITIES, TICKET_STATUSES } from "@/lib/db/schema";
 import {
   CATEGORIES,
+  formatBytes,
   formatDate,
   formatDateTime,
   parseRef,
@@ -35,6 +37,7 @@ import {
   STATUS_LABELS,
   STATUS_TONES,
 } from "@/lib/tickets/format";
+import { attachmentsForTicket } from "@/lib/storage/attachments";
 import { assignableStaff, getThread, getTicketByNumber } from "@/lib/tickets/queries";
 import { assignToMe, replyToTicket, retryEmail, updateTicketDetails } from "../actions";
 
@@ -61,7 +64,8 @@ export default async function TicketPage({ params, searchParams }: { params: Par
   if (!row || !staff.can("tickets.view", row.ticket.segment)) notFound();
   const { ticket, contact } = row;
   const { created } = await searchParams;
-  const [thread, people] = await Promise.all([getThread(ticket.id), assignableStaff(ticket.segment)]);
+  const [thread, people, attachments] = await Promise.all([getThread(ticket.id), assignableStaff(ticket.segment), attachmentsForTicket(ticket.id)]);
+  const filesFor = (messageId: string) => attachments.filter((a) => a.messageId === messageId);
   const assignee = people.find((p) => p.id === ticket.assigneeId);
   const may = {
     reply: staff.can("tickets.reply", ticket.segment),
@@ -118,7 +122,13 @@ export default async function TicketPage({ params, searchParams }: { params: Par
                       .filter(Boolean)
                       .join(" · ")}
                     footer={
-                      item.message.emailStatus === "failed" && may.reply ? (
+                      filesFor(item.message.id).length > 0 ? (
+                        <div className="ds-inline ds-inline-small">
+                          {filesFor(item.message.id).map((a) => (
+                            <ChatAttachment key={a.id} name={a.fileName} detail={`${a.contentType.split("/")[1]?.toUpperCase() ?? "File"} · ${formatBytes(a.sizeBytes)}`} href={`/admin/attachments/${a.id}`} />
+                          ))}
+                        </div>
+                      ) : item.message.emailStatus === "failed" && may.reply ? (
                         <ActionForm action={retryEmail} label="Resend email">
                           <Alert tone="error">{item.message.emailError ?? "The email wasn't sent."}</Alert>
                           <input type="hidden" name="number" value={ticket.number} />
@@ -237,6 +247,10 @@ export default async function TicketPage({ params, searchParams }: { params: Par
                   { term: "Email", detail: contact?.email ?? "None" },
                   { term: "Phone", detail: contact?.phone ?? "None" },
                   ...(contact?.companyName ? [{ term: "Business", detail: contact.companyName }] : []),
+                  ...(contact?.accountCode ? [{ term: "Account number", detail: contact.accountCode }] : []),
+                  ...(contact?.shopifyCustomerId ? [{ term: "Shopify", detail: "Signed in when they wrote" }] : []),
+                  ...(ticket.purchasedFrom ? [{ term: "Bought from", detail: ticket.purchasedFrom }] : []),
+                  ...(ticket.orderNumber ? [{ term: "Order number", detail: ticket.orderNumber }] : []),
                 ]}
               />
             </Panel>

@@ -61,3 +61,10 @@ export function formatAgo(d: Date, now = new Date()): string {
   if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
   return formatDate(d);
 }
+
+/** 1.2 MB, 340 KB: as the design system's FileField shows sizes (that one is client-only). */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1000) return `${bytes} B`;
+  if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`;
+  return `${(bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 1 : 0)} MB`;
+}
