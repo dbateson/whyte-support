@@ -95,7 +95,8 @@ export function parseZohoCases(csv: string): ParsedCase[] {
     const id = pick(row, ["case number", "case id", "record id", "id"]);
     const subject = pick(row, ["subject", "case subject"]);
     const description = pick(row, ["description", "case description"]);
-    const answer = [pick(row, ["solution", "resolution"]), pick(row, ["internal comments", "comments", "add comment"])].filter(Boolean).join("\n\n");
+    // Only what Whyte told the customer. "Internal Comments" are staff notes and never feed the knowledge base.
+    const answer = [pick(row, ["solution", "resolution"]), pick(row, ["comments", "add comment"])].filter(Boolean).join("\n\n");
     if (!id || (!description && !answer)) continue;
     const meta = [pick(row, ["type", "case type", "case reason"]), pick(row, ["product name", "product"]), pick(row, ["status"])].filter(Boolean).join(" · ");
     out.push({

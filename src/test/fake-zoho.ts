@@ -122,6 +122,7 @@ export class FakeZoho {
       if (!slice.length) return this.json(null, 204);
       return this.json({ data: slice, info: { more_records: list.length > page * per, page, per_page: per } });
     }
+    if (path === "/Tasks" && method === "POST") return this.json({ data: [{ code: "SUCCESS", status: "success", message: "record added", details: { id: this.nextId() } }] }, 201);
     if (path === "/actions/watch") return this.json({ watch: [{ code: "SUCCESS", status: "success" }] });
     if (path === "/settings/fields") return this.json({ fields: [] });
     return this.json({ code: "NOT_FOUND", status: "error" }, 404);

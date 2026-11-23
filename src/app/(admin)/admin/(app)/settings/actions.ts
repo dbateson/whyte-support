@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/ActionForm";
 import { testAnthropicConnection } from "@/lib/ai/client";
-import { isPermission } from "@/lib/auth/permissions";
+import { grantsWithin, isPermission } from "@/lib/auth/permissions";
+import type { Staff } from "@/lib/auth/session";
+import { db, schema } from "@/lib/db";
+import { eq, inArray } from "drizzle-orm";
 import { requireStaff } from "@/lib/auth/session";
 import { createInviteLink, deleteRole, inviteUser, resetUserMfa, saveRole, setUserDisabled, setUserRoles } from "@/lib/auth/users";
 import { testEmailConnection } from "@/lib/email/postmark";
@@ -14,6 +17,7 @@ import { log } from "@/lib/logger";
 import { baseUrl } from "@/lib/request";
 import { clearSecret, setSecret } from "@/lib/secrets";
 import { getSetting, saveSettings } from "@/lib/settings";
+import { ZOHO_ACCOUNTS_DOMAINS, ZOHO_API_DOMAIN } from "@/lib/zoho/mapping";
 
 const str = (d: FormData, k: string) => String(d.get(k) ?? "").trim();
 
@@ -74,6 +78,8 @@ export async function saveGeneralAction(_: ActionState, data: FormData): Promise
     const bad = values["embed.allowed_origins"].split(",").map((o) => o.trim()).filter((o) => o && !/^https?:\/\/[^\s/]+$/.test(o));
     if (bad.length) return { error: `These aren't site addresses (like https://www.whytebikes.com, no path): ${bad.join(", ")}` };
   }
+  if (values["zoho.accounts_domain"] && !ZOHO_ACCOUNTS_DOMAINS.includes(values["zoho.accounts_domain"])) return { error: "Choose one of Zoho's data centres." };
+  if (values["zoho.api_domain"] && !ZOHO_API_DOMAIN.test(values["zoho.api_domain"])) return { error: "Choose one of Zoho's data centres." };
   if (values["shopify.shop_domain"] && !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(values["shopify.shop_domain"]!)) {
     return { error: "The shop domain should be the .myshopify.com one, e.g. whyte-bikes.myshopify.com" };
   }
@@ -84,12 +90,37 @@ export async function saveGeneralAction(_: ActionState, data: FormData): Promise
     if (values[key] && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(values[key]!)) return { error: "Check the email addresses: one doesn't look right." };
   }
   if (values["chatbot.daily_limit"] !== undefined && !/^\d{1,7}$/.test(values["chatbot.daily_limit"])) return { error: "Answers per day should be a whole number (0 for no limit)." };
+  if (values["retention.ticket_years"] !== undefined && !/^([1-9]|1\d|20)$/.test(values["retention.ticket_years"])) return { error: "Keep closed tickets for between 1 and 20 years." };
+  // Pointing storage at a different Supabase project must not hand it this project's key.
+  const before = await getSetting("storage.supabase_url");
+  const storageMoved = values["storage.supabase_url"] !== undefined && values["storage.supabase_url"].replace(/\/$/, "") !== before.replace(/\/$/, "") && before !== "";
   await saveSettings(values, { id: staff.id, label: staff.name });
+  if (storageMoved) await clearSecret("storage.service_key", { id: staff.id, label: staff.name });
   revalidatePath("/admin/settings/general");
-  return { notice: "Saved." };
+  return { notice: storageMoved ? "Saved. The storage key was cleared because the project changed: enter the new project's key in Integrations." : "Saved." };
 }
 
 /* ---------- Users ---------- */
+
+/**
+ * No escalation: a person can only hand out (by invite, role change or role
+ * edit) permissions they hold themselves, in the segments they hold them, and
+ * can't change the roles of someone who holds more than they do.
+ */
+type Grant = { permissions: string[]; segments: string[] };
+const within = (staff: Staff, grants: Grant[]) => grantsWithin(staff.roles, grants);
+async function rolesById(ids: string[]): Promise<Grant[]> {
+  if (ids.length === 0) return [];
+  return db().select({ permissions: schema.roles.permissions, segments: schema.roles.segments }).from(schema.roles).where(inArray(schema.roles.id, ids));
+}
+async function rolesOfUser(userId: string): Promise<Grant[]> {
+  return db()
+    .select({ permissions: schema.roles.permissions, segments: schema.roles.segments })
+    .from(schema.userRoles)
+    .innerJoin(schema.roles, eq(schema.roles.id, schema.userRoles.roleId))
+    .where(eq(schema.userRoles.userId, userId));
+}
+const ESCALATION = "Your own roles don't include everything those roles allow, so you can't give them out. Ask an admin.";
 
 export async function inviteUserAction(_: ActionState, data: FormData): Promise<ActionState> {
   const staff = await requireStaff("users.manage");
@@ -98,6 +129,7 @@ export async function inviteUserAction(_: ActionState, data: FormData): Promise<
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "Enter a valid email address." };
   if (!name) return { error: "Enter their name." };
   const roleIds = data.getAll("roles").map(String);
+  if (!within(staff, await rolesById(roleIds))) return { error: ESCALATION };
   let result: Awaited<ReturnType<typeof inviteUser>>;
   try {
     result = await inviteUser({ email, name, roleIds }, { id: staff.id, label: staff.name }, await baseUrl());
@@ -115,8 +147,10 @@ export async function inviteUserAction(_: ActionState, data: FormData): Promise<
 export async function saveUserRolesAction(_: ActionState, data: FormData): Promise<ActionState> {
   const staff = await requireStaff("users.manage");
   const userId = str(data, "userId");
+  const roleIds = data.getAll("roles").map(String);
+  if (!within(staff, [...(await rolesById(roleIds)), ...(await rolesOfUser(userId))])) return { error: ESCALATION };
   try {
-    await setUserRoles(userId, data.getAll("roles").map(String), { id: staff.id, label: staff.name });
+    await setUserRoles(userId, roleIds, { id: staff.id, label: staff.name });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Couldn't save." };
   }
@@ -130,6 +164,8 @@ export async function userAccessAction(_: ActionState, data: FormData): Promise<
   const intent = str(data, "intent");
   const actor = { id: staff.id, label: staff.name };
   if (userId === staff.id && intent === "disable") return { error: "You can't disable your own account." };
+  // Disabling, resetting or re-inviting someone who holds more than you would be a way round the rule.
+  if (!within(staff, await rolesOfUser(userId))) return { error: "That person holds permissions you don't, so ask an admin." };
   try {
     if (intent === "disable") await setUserDisabled(userId, true, actor);
     else if (intent === "enable") await setUserDisabled(userId, false, actor);
@@ -161,6 +197,7 @@ export async function saveRoleAction(_: ActionState, data: FormData): Promise<Ac
   const segments = data.getAll("segments").map(String).filter((s) => s === "b2c" || s === "b2b");
   if (segments.length === 0) return { error: "Choose at least one segment." };
   const id = str(data, "id") || undefined;
+  if (!within(staff, [{ permissions, segments }, ...(id ? await rolesById([id]) : [])])) return { error: ESCALATION };
   let saved: string;
   try {
     saved = await saveRole({ id, name, description: str(data, "description"), permissions, segments }, { id: staff.id, label: staff.name });
@@ -175,6 +212,7 @@ export async function saveRoleAction(_: ActionState, data: FormData): Promise<Ac
 
 export async function deleteRoleAction(_: ActionState, data: FormData): Promise<ActionState> {
   const staff = await requireStaff("users.manage");
+  if (!within(staff, await rolesById([str(data, "id")].filter((i) => /^[0-9a-f-]{36}$/.test(i))))) return { error: ESCALATION };
   try {
     await deleteRole(str(data, "id"), { id: staff.id, label: staff.name });
   } catch (err) {

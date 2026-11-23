@@ -93,3 +93,7 @@ export function domainOf(website: string | null | undefined): string | null {
 export const PUBLIC_EMAIL_DOMAINS = new Set(["gmail.com", "googlemail.com", "hotmail.com", "hotmail.co.uk", "outlook.com", "live.com", "live.co.uk", "yahoo.com", "yahoo.co.uk", "icloud.com", "me.com", "aol.com", "btinternet.com", "sky.com", "protonmail.com", "proton.me"]);
 
 export const NOTE_MAX = 30_000;
+
+/** Zoho's data centres. The client secret and refresh token are only ever sent to these. */
+export const ZOHO_ACCOUNTS_DOMAINS = ["https://accounts.zoho.eu", "https://accounts.zoho.com", "https://accounts.zoho.in", "https://accounts.zoho.com.au", "https://accounts.zoho.jp", "https://accounts.zohocloud.ca", "https://accounts.zoho.uk"];
+export const ZOHO_API_DOMAIN = /^https:\/\/(www\.)?zohoapis\.(eu|com|in|com\.au|jp|ca|uk)$/;

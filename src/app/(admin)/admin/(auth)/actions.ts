@@ -7,7 +7,8 @@ import { hashPassword, passwordProblem, verifyPassword, dummyHash } from "@/lib/
 import { recordSignIn, signInBlocked } from "@/lib/auth/rate-limit";
 import { completeMfa, endSession, readSession, startSession } from "@/lib/auth/session";
 import { generateTotpSecret, verifyTotp } from "@/lib/auth/totp";
-import { claimTotpStep, decryptTotpSecret, encryptTotpSecret, requestPasswordReset, setPasswordWithToken } from "@/lib/auth/users";
+import { claimTotpStep, decryptTotpSecret, encryptTotpSecret, notifyAuthenticatorAdded, requestPasswordReset, setPasswordWithToken } from "@/lib/auth/users";
+import { allow } from "@/lib/rate-limit";
 import { db, schema } from "@/lib/db";
 import { baseUrl, clientIp } from "@/lib/request";
 
@@ -64,12 +65,14 @@ export async function confirmTotpSetup(_: ActionState, data: FormData): Promise<
   if (s.totpEnabled) redirect("/admin/login/verify");
   const [user] = await db().select().from(schema.users).where(eq(schema.users.id, s.userId));
   if (!user?.totpSecret) redirect("/admin/login/setup");
+  if (!(await allow("totp-setup", user.id, 10, 15 * 60 * 1000))) return { error: "Too many tries. Wait a few minutes, then try again." };
   const step = verifyTotp(decryptTotpSecret(user.id, user.totpSecret), str(data, "code"));
   if (step === null || !(await claimTotpStep(user.id, step))) {
     return { error: "That code didn't work. Check the app shows Whyte Support, then enter its current code." };
   }
   await db().update(schema.users).set({ totpEnabledAt: new Date() }).where(eq(schema.users.id, user.id));
   await db().insert(schema.auditLog).values({ actorId: user.id, actorLabel: user.name, action: "user.mfa_enabled", target: user.email });
+  await notifyAuthenticatorAdded(user);
   await completeMfa(s);
   redirect("/admin");
 }

@@ -225,6 +225,8 @@ export const tickets = pgTable(
     lastCustomerMessageAt: timestamp("last_customer_message_at", { withTimezone: true }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
+    /** Set when its content was erased (a GDPR request, or the retention period passing). Statistics are kept. */
+    erasedAt: timestamp("erased_at", { withTimezone: true }),
     /** Maintained by a trigger: subject, reference, frame number, contact and every message. */
     searchVector: tsvector("search_vector"),
   },
@@ -374,6 +376,12 @@ export const kbArticleVersions = pgTable(
     /** Markdown. */
     body: text("body").notNull(),
     status: text("status", { enum: KB_VERSION_STATUSES }).notNull().default("draft"),
+    /**
+     * An audience change waiting with this draft. A published article's
+     * audience only changes when this version is published (and approved),
+     * so an unapproved edit can never show dealer text to riders.
+     */
+    audience: text("audience", { enum: KB_AUDIENCES }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     /** "Claude (from 6 support emails)" for drafts the pipeline wrote. */
     authorLabel: text("author_label").notNull(),

@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireStaff } from "@/lib/auth/session";
+import { canChange } from "@/lib/kb/access";
 import { db, schema } from "@/lib/db";
 import { createJob, runStep, type Job } from "@/lib/ingest/pipeline";
 import { baseUrl } from "@/lib/request";
@@ -46,7 +47,7 @@ export async function startImport(input: unknown): Promise<{ error?: string }> {
   const v = parsed.data;
   const keysOk = "files" in v ? v.files.every((f) => /^imports\/\d{4}-\d{2}-\d{2}\/[0-9a-f-]{36}$/.test(f.key)) : true;
   if (!keysOk) return { error: "Bad file reference." };
-  if (v.kind === "web" && !/^https:\/\/([a-z0-9-]+\.)*whytebikes\.com\//i.test(v.sitemapUrl) && process.env.NODE_ENV === "production") {
+  if (v.kind === "web" && process.env.NODE_ENV === "production" && !/^https:\/\/([a-z0-9-]+\.)*whytebikes\.com\/[^\s]*$/i.test(v.sitemapUrl)) {
     return { error: "Only whytebikes.com sitemaps can be crawled." };
   }
   const params =
@@ -57,18 +58,29 @@ export async function startImport(input: unknown): Promise<{ error?: string }> {
         : v.kind === "zoho_csv"
           ? { key: v.files[0]!.key }
           : { sitemapUrl: v.sitemapUrl, include: v.include };
+  // Drafts land in the chosen audience: the editor must be allowed to edit there.
+  if (!canChange(staff, "kb.edit", v.audience)) return { error: "Your role can't add articles for that audience." };
   const job = await createJob({ kind: v.kind, label: v.label, defaultAudience: v.audience, params }, { id: staff.id, label: staff.name });
   redirect(`/admin/kb/import/${job.id}`);
 }
 
 /** One step of work, called by the job page while it's open. */
+/** An import this person may run or cancel: one whose audience they can edit. */
+async function ownJob(jobId: string) {
+  const staff = await requireStaff("kb.edit");
+  if (!/^[0-9a-f-]{36}$/.test(jobId)) throw new Error("No such import.");
+  const [job] = await db().select({ id: schema.ingestJobs.id, audience: schema.ingestJobs.defaultAudience }).from(schema.ingestJobs).where(eq(schema.ingestJobs.id, jobId));
+  if (!job || !canChange(staff, "kb.edit", job.audience)) throw new Error("No such import.");
+  return job;
+}
+
 export async function stepImport(jobId: string): Promise<Pick<Job, "status" | "stats" | "error">> {
-  await requireStaff("kb.edit");
+  await ownJob(jobId);
   const job = await runStep(jobId, await baseUrl(), 40_000);
   return { status: job.status, stats: job.stats, error: job.error };
 }
 
 export async function cancelImport(jobId: string): Promise<void> {
-  await requireStaff("kb.edit");
+  await ownJob(jobId);
   await db().update(schema.ingestJobs).set({ status: "cancelled", finishedAt: new Date() }).where(eq(schema.ingestJobs.id, jobId));
 }

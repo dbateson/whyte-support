@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import { Button, PageHeader, Stack, TopBar } from "@whyte/design-system";
 import logo from "@whyte/design-system/logos/whyte-lockup-horizontal.svg";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { Markdown } from "@/components/Markdown";
 import { db, schema } from "@/lib/db";
@@ -18,7 +18,7 @@ const publicArticle = cache(async (id: string) => {
     .select({ audience: schema.kbArticles.audience, title: schema.kbArticleVersions.title, body: schema.kbArticleVersions.body, publishedAt: schema.kbArticleVersions.createdAt })
     .from(schema.kbArticles)
     .innerJoin(schema.kbArticleVersions, eq(schema.kbArticleVersions.id, schema.kbArticles.publishedVersionId))
-    .where(eq(schema.kbArticles.id, id));
+    .where(and(eq(schema.kbArticles.id, id), isNull(schema.kbArticles.retiredAt)));
   return row && row.audience !== "b2b" ? row : null;
 });
 

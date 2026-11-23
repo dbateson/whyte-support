@@ -7,5 +7,6 @@ export default async function SettingsIndex() {
   if (staff.can("settings.manage")) redirect("/admin/settings/integrations");
   if (staff.can("users.manage")) redirect("/admin/settings/users");
   if (staff.can("audit.view")) redirect("/admin/settings/audit");
+  if (staff.can("gdpr.process")) redirect("/admin/privacy");
   redirect("/admin/no-access");
 }

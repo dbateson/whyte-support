@@ -142,13 +142,19 @@ export function ChatApp({ apiBase = "", segment: fixedSegment, shopifyToken, ide
           .then((d: { token?: string } | null) => d?.token || undefined)
           .catch(() => undefined);
       }
-      const r = await post<{ sessionId: string; token: string; segment: Segment; phone: string | null }>(`${apiBase}/api/public/chat/sessions`, { segment, turnstileToken, shopifyToken: customerToken });
+      const r = await post<{ sessionId: string; token: string; segment: Segment; dealerVerified: boolean; phone: string | null }>(`${apiBase}/api/public/chat/sessions`, { segment, turnstileToken, shopifyToken: customerToken });
       if (!r.ok) {
         setBusy(false);
         setError(r.error);
         return;
       }
-      current = { ...r.data, turns: [] };
+      const { dealerVerified, ...session } = r.data;
+      // Dealer-only answers need a verified trade account; say so once, up front.
+      const notice: Turn[] =
+        session.segment === "b2b" && !dealerVerified
+          ? [{ id: `notice-${Date.now()}`, role: "assistant", text: "I can answer general questions here. For trade answers (dealer warranty claims, pricing, stock), sign in to your trade account on whytebikes.com first, or send your question to the dealer team." }]
+          : [];
+      current = { ...session, turns: notice };
     }
     const userTurn: Turn = { id: `u-${Date.now()}`, role: "user", text };
     current = { ...current, turns: [...current.turns, userTurn] };

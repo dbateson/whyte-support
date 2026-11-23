@@ -16,6 +16,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     settings: staff.can("settings.manage"),
     users: staff.can("users.manage"),
     audit: staff.can("audit.view"),
+    privacy: staff.can("gdpr.process"),
   };
   return (
     <AppShell sidebar={<AdminNav show={nav} name={staff.name} email={staff.email} detail={staff.roleNames.join(", ") || "No role"} signOut={signOut} />}>

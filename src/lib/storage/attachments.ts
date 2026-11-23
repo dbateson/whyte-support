@@ -78,8 +78,13 @@ export async function attachUploads(ids: string[], claimKey: string, ticketId: s
   const good: string[] = [];
   for (const row of rows) {
     const info = await store.stat(row.storageKey);
-    if (!info || info.size === 0 || info.size > ATTACHMENT_LIMITS.maxBytes) {
-      log.warn("Attachment missing or wrong size at submit", { id: row.id, size: info?.size });
+    // What was stored must be what was asked for: within the size limit, and the declared type
+    // (the bucket also only accepts the allowed types and sizes).
+    const declared = row.contentType.split(";")[0]!.trim().toLowerCase();
+    const actual = info?.contentType?.split(";")[0]!.trim().toLowerCase() ?? null;
+    if (!info || info.size === 0 || info.size > ATTACHMENT_LIMITS.maxBytes || (actual && actual !== declared)) {
+      log.warn("Attachment missing, wrong size or wrong type at submit", { id: row.id, size: info?.size, declared, actual });
+      if (info) await store.remove([row.storageKey]).catch(() => undefined);
       continue;
     }
     good.push(row.id);

@@ -58,6 +58,17 @@ export default async function GeneralSettingsPage() {
               <TextField label="Phone number for dealers (B2B)" name="support.phone.b2b" type="tel" defaultValue={s["support.phone.b2b"]} />
             </Stack>
           </Panel>
+          <Panel title="Data retention" description="UK GDPR: keep customer data only as long as needed. Customers can also ask to be erased sooner (Privacy requests).">
+            <TextField
+              label="Years to keep closed tickets"
+              name="retention.ticket_years"
+              type="number"
+              min={1}
+              max={20}
+              defaultValue={s["retention.ticket_years"]}
+              help="After this long untouched, a closed ticket's messages, files and personal details are erased; its dates and category stay for statistics. Chats are kept 12 months."
+            />
+          </Panel>
           <Panel title="Zoho CRM" description="Zoho's data centre. UK accounts are usually on zoho.eu.">
             <Stack gap="small">
               <Select label="Accounts server" name="zoho.accounts_domain" defaultValue={s["zoho.accounts_domain"]}>

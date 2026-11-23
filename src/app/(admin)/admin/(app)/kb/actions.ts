@@ -6,7 +6,7 @@ import type { ActionState } from "@/components/ActionForm";
 import { requireStaff, type Staff } from "@/lib/auth/session";
 import type { KbAudience } from "@/lib/db/schema";
 import { canChange, canSee } from "@/lib/kb/access";
-import { createArticle, discardDraft, getArticle, KbError, publish, requestChanges, restore, retire, saveDraft, submitForReview, syncChunkAudience } from "@/lib/kb/service";
+import { createArticle, discardDraft, getArticle, KbError, publish, requestChanges, restore, retire, saveDraft, submitForReview } from "@/lib/kb/service";
 import { CATEGORIES } from "@/lib/tickets/format";
 
 const str = (d: FormData, k: string) => String(d.get(k) ?? "").trim();
@@ -50,7 +50,6 @@ export async function saveArticleAction(_: ActionState, data: FormData): Promise
     await saveDraft(id, { title: f.title, body: f.body, audience: f.audience, category: f.category }, actor(staff));
     if (intent === "submit") await submitForReview(id, actor(staff));
     if (intent === "publish") await publish(id, actor(staff));
-    if (current.article.audience !== f.audience && intent !== "publish") await syncChunkAudience(id, f.audience);
   } catch (err) {
     if (err instanceof KbError) return { error: err.message };
     throw err;
@@ -69,7 +68,9 @@ export async function articleStateAction(_: ActionState, data: FormData): Promis
   const audience = current.article.audience;
   const intent = str(data, "intent");
   const needs = intent === "submit" || intent === "discard" ? "kb.edit" : "kb.approve";
-  if (!canChange(staff, needs, audience)) return { error: "Your role can't do that for this article." };
+  // A pending audience change must be within the approver's segments too.
+  const pending = current.working?.audience;
+  if (!canChange(staff, needs, audience) || (pending && !canChange(staff, needs, pending))) return { error: "Your role can't do that for this article." };
   try {
     switch (intent) {
       case "submit":

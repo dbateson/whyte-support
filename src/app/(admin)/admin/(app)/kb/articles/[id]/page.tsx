@@ -45,6 +45,7 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
           <span className="ds-inline ds-inline-small">
             <Status tone={s.tone}>{s.label}</Status>
             <Badge>{AUDIENCE_LABELS[article.audience]}</Badge>
+            {working?.audience && working.audience !== article.audience && <span>Changes to {AUDIENCE_LABELS[working.audience]} when this draft is published</span>}
             {article.category && <span>{article.category}</span>}
           </span>
         }
@@ -62,7 +63,7 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
               <Panel title={working ? `Version ${working.number} (${VERSION_STATUS[working.status].toLowerCase()})` : `Edit (starts version ${(published?.number ?? 0) + 1})`} description={published ? "Changes stay out of the chatbot until they're published." : undefined}>
                 <ActionForm action={saveArticleAction} label="Edit article">
                   <input type="hidden" name="id" value={article.id} />
-                  <ArticleFields title={current?.title} body={current?.body} audience={article.audience} category={article.category} audiences={audiences.includes(article.audience) ? audiences : [article.audience, ...audiences]} />
+                  <ArticleFields title={current?.title} body={current?.body} audience={current?.audience ?? article.audience} category={article.category} audiences={audiences.includes(article.audience) ? audiences : [article.audience, ...audiences]} />
                   <div className="ds-inline">
                     {may.approve ? (
                       <>

@@ -59,7 +59,8 @@ describe.skipIf(!TEST_DATABASE_URL)("ingestion pipeline", () => {
     server = createServer((req, res) => {
       const pages: Record<string, string> = {
         "/sitemap.xml": `<sitemapindex><sitemap><loc>${base}/sitemap_pages_1.xml</loc></sitemap><sitemap><loc>${base}/sitemap_products_1.xml</loc></sitemap></sitemapindex>`,
-        "/sitemap_pages_1.xml": `<urlset><url><loc>${base}/pages/warranty</loc></url><url><loc>${base}/pages/about</loc></url></urlset>`,
+        // The last entry points elsewhere (an internal address): it must never be fetched.
+        "/sitemap_pages_1.xml": `<urlset><url><loc>${base}/pages/warranty</loc></url><url><loc>${base}/pages/about</loc></url><url><loc>http://169.254.169.254/pages/latest</loc></url></urlset>`,
         "/sitemap_products_1.xml": `<urlset><url><loc>${base}/products/905</loc></url></urlset>`,
         "/pages/warranty": `<html><body><nav>Menu</nav><main><h1>Warranty</h1><p>${"Our frames carry a warranty against manufacturing defects. ".repeat(6)}</p></main></body></html>`,
         "/pages/about": `<html><body><main><h1>About us</h1><p>${"We are a British bike brand founded in Oxfordshire. ".repeat(6)}</p></main></body></html>`,
@@ -137,7 +138,7 @@ describe.skipIf(!TEST_DATABASE_URL)("ingestion pipeline", () => {
     const job = await createJob({ kind: "web", label: "Site", defaultAudience: "both", params: { sitemapUrl: `${base}/sitemap.xml`, include: ["pages"] } }, { label: "Test" });
     const done = await finish(job.id);
     expect(done.status).toBe("done");
-    expect((done.stats as { pagesFound: number }).pagesFound).toBe(2); // products excluded
+    expect((done.stats as { pagesFound: number }).pagesFound).toBe(2); // products and the off-site address excluded
     const items = await sql`select external_id, status from ingest_items order by external_id`;
     expect(items.map((i) => [i.external_id.replace(base, ""), i.status])).toEqual([
       ["/pages/about", "skipped"],

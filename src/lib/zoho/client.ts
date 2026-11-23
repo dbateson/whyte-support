@@ -6,6 +6,7 @@ import { env } from "../env";
 import { log, registerSecretValue } from "../logger";
 import { getSecret } from "../secrets";
 import { getSettings } from "../settings";
+import { ZOHO_ACCOUNTS_DOMAINS, ZOHO_API_DOMAIN } from "./mapping";
 import { clearState, readState, writeState } from "./state";
 
 /**
@@ -19,6 +20,8 @@ export const ZOHO_SCOPES = [
   "ZohoCRM.modules.accounts.READ",
   "ZohoCRM.modules.cases.ALL",
   "ZohoCRM.modules.notes.ALL",
+  // Erasure requests become a task in Zoho for someone to act on (Zoho owns its own records).
+  "ZohoCRM.modules.tasks.CREATE",
   "ZohoCRM.notifications.ALL",
   "ZohoCRM.settings.fields.READ",
 ];
@@ -53,7 +56,11 @@ const ring = () => keyRingFromEnv(env());
 async function credentials() {
   const [clientId, clientSecret, refreshToken] = await Promise.all([getSecret("zoho.client_id"), getSecret("zoho.client_secret"), getSecret("zoho.refresh_token")]);
   const s = await getSettings(["zoho.accounts_domain", "zoho.api_domain"]);
-  return { clientId, clientSecret, refreshToken, accountsDomain: s["zoho.accounts_domain"].replace(/\/$/, ""), apiDomain: s["zoho.api_domain"].replace(/\/$/, "") };
+  const accountsDomain = s["zoho.accounts_domain"].replace(/\/$/, "");
+  const apiDomain = s["zoho.api_domain"].replace(/\/$/, "");
+  // Credentials only ever go to Zoho's own servers, whatever the settings say.
+  if (!ZOHO_ACCOUNTS_DOMAINS.includes(accountsDomain) || !ZOHO_API_DOMAIN.test(apiDomain)) throw new ZohoError("The Zoho data centre setting isn't a Zoho address.", "BAD_DOMAIN", 0, false);
+  return { clientId, clientSecret, refreshToken, accountsDomain, apiDomain };
 }
 
 export async function zohoConnected(): Promise<boolean> {
@@ -105,7 +112,8 @@ async function accessToken(force = false): Promise<CachedToken> {
     const c = await credentials();
     if (!c.clientId || !c.clientSecret || !c.refreshToken) throw new ZohoNotConfiguredError();
     const t = await tokenRequest(c.accountsDomain, { grant_type: "refresh_token", client_id: c.clientId, client_secret: c.clientSecret, refresh_token: c.refreshToken });
-    const fresh: CachedToken = { token: t.access_token, apiDomain: (t.api_domain ?? c.apiDomain).replace(/\/$/, ""), expiresAt: Date.now() + (t.expires_in ?? 3600) * 1000 };
+    const offered = (t.api_domain ?? "").replace(/\/$/, "");
+    const fresh: CachedToken = { token: t.access_token, apiDomain: ZOHO_API_DOMAIN.test(offered) ? offered : c.apiDomain, expiresAt: Date.now() + (t.expires_in ?? 3600) * 1000 };
     await writeState(TOKEN_KEY, { sealed: encrypt(JSON.stringify(fresh), "zoho:access-token", ring()) });
     return fresh;
   });

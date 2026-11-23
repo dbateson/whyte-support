@@ -8,6 +8,7 @@ import { advanceAll, purgeStaleIngestItems } from "@/lib/ingest/pipeline";
 import { embedMissing } from "@/lib/kb/service";
 import { purgeOldChats } from "@/lib/chat/engine";
 import { purgeSyncLog } from "@/lib/zoho/sync";
+import { retentionSweep } from "@/lib/privacy/service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -16,7 +17,8 @@ export const maxDuration = 300;
  * Nightly job (vercel.json crons): advances unfinished imports, embeds new
  * knowledge-base passages, and tidies up abandoned uploads, expired sessions
  * and links, old rate-limit rows, unused imported text (90 days) and chat
- * conversations idle for 12 months (escalated ones live on in their ticket). Vercel sends CRON_SECRET as a
+ * conversations idle for 12 months (escalated ones live on in their ticket),
+ * and erases closed tickets past the retention period (Settings → General). Vercel sends CRON_SECRET as a
  * bearer token; without that variable set, the route refuses everyone.
  */
 export async function GET(req: Request) {
@@ -35,6 +37,14 @@ export async function GET(req: Request) {
   await purgeStaleIngestItems();
   result.chats = await purgeOldChats();
   await purgeSyncLog();
+  try {
+    const kept = await retentionSweep(selfOrigin(req));
+    result.retentionTickets = kept.tickets;
+    result.retentionContacts = kept.contacts;
+  } catch (err) {
+    log.error("Retention sweep failed", { err });
+    result.retention = "failed";
+  }
   try {
     result.imports = await advanceAll(selfOrigin(req), 200_000);
     result.embedded = await embedMissing();

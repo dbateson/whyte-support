@@ -84,3 +84,13 @@ export const SYSTEM_ROLES: { name: string; description: string; permissions: Per
     segments: ["b2c", "b2b"],
   },
 ];
+
+/**
+ * No escalation: true when every permission in `grants` (in each of its
+ * segments, for segmented ones) is one the person already holds.
+ */
+export function grantsWithin(holder: readonly RoleGrant[], grants: { permissions: readonly string[]; segments: readonly string[] }[]): boolean {
+  return grants.every((g) =>
+    g.permissions.filter(isPermission).every((p) => (PERMISSIONS[p].segmented ? g.segments.every((seg) => can(holder, p, seg as Segment)) : can(holder, p))),
+  );
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALL_PERMISSIONS, can, segmentsFor, SYSTEM_ROLES } from "./permissions";
+import { ALL_PERMISSIONS, can, grantsWithin, segmentsFor, SYSTEM_ROLES } from "./permissions";
 
 const role = (name: string) => SYSTEM_ROLES.find((r) => r.name === name)!;
 
@@ -29,5 +29,17 @@ describe("permissions", () => {
     expect(can([], "tickets.view")).toBe(false);
     expect(ALL_PERMISSIONS.every((p) => can([role("Admin")], p, "b2c"))).toBe(true);
     expect(can([role("Read-only")], "tickets.update")).toBe(false);
+  });
+});
+
+describe("no escalation", () => {
+  it("lets people hand out only what they hold, in the segments they hold it", () => {
+    const b2bAgent = [role("B2B Agent")];
+    const admin = [role("Admin")];
+    expect(grantsWithin(admin, [role("Agent"), role("KB Editor")])).toBe(true);
+    expect(grantsWithin(b2bAgent, [role("Admin")])).toBe(false);
+    expect(grantsWithin(b2bAgent, [{ permissions: ["tickets.reply"], segments: ["b2b"] }])).toBe(true);
+    expect(grantsWithin(b2bAgent, [{ permissions: ["tickets.reply"], segments: ["b2b", "b2c"] }])).toBe(false);
+    expect(grantsWithin(b2bAgent, [{ permissions: ["users.manage"], segments: ["b2b"] }])).toBe(false);
   });
 });

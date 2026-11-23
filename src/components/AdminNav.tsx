@@ -15,6 +15,7 @@ export interface NavVisibility {
   settings: boolean;
   users: boolean;
   audit: boolean;
+  privacy: boolean;
 }
 
 function isCurrent(pathname: string, href: string) {
@@ -46,6 +47,7 @@ export function AdminNav({
     show.users && { href: "/admin/settings/users", label: "Users" },
     show.users && { href: "/admin/settings/roles", label: "Roles" },
     show.audit && { href: "/admin/settings/audit", label: "Audit log" },
+    show.privacy && { href: "/admin/privacy", label: "Privacy requests" },
   ].filter(Boolean) as { href: string; label: string }[];
   const sections = [
     { href: "/admin", label: "Overview" },
