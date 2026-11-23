@@ -5,6 +5,7 @@ import { db, schema, type Db } from "../db";
 import type { Segment, TicketPriority, TicketSource, TicketStatus } from "../db/schema";
 import { mailboxKey, messageIdFor, replyToAddress } from "../email/addresses";
 import { EmailNotConfiguredError, EmailSendError, sendEmail } from "../email/postmark";
+import { enqueueTicket } from "../ingest/pipeline";
 import { log } from "../logger";
 import { getSettings } from "../settings";
 import { PRIORITY_LABELS, ref, SEGMENT_LABELS, STATUS_LABELS } from "./format";
@@ -154,7 +155,7 @@ export type TicketChanges = Partial<{
 
 /** Applies changes, logs an event for each one people track, and keeps the timestamps in step. */
 export async function updateTicket(ticket: Ticket, changes: TicketChanges, actor: Actor, labelForUser?: (id: string | null) => string): Promise<Ticket> {
-  return db().transaction(async (tx) => {
+  const result = await db().transaction(async (tx) => {
     const set: Partial<typeof schema.tickets.$inferInsert> = {};
     const events: (typeof schema.ticketEvents.$inferInsert)[] = [];
     const event = (type: (typeof schema.ticketEvents.$inferInsert)["type"], from: string | null, to: string | null) =>
@@ -197,6 +198,11 @@ export async function updateTicket(ticket: Ticket, changes: TicketChanges, actor
     if (events.length) await tx.insert(schema.ticketEvents).values(events);
     return updated!;
   });
+  // A resolved ticket is a candidate for the knowledge base (as a draft, after review).
+  if (changes.status === "resolved" && ticket.status !== "resolved") {
+    await enqueueTicket(ticket.id).catch((err) => log.warn("Couldn't queue a resolved ticket for the knowledge base", { err, ticket: ticket.number }));
+  }
+  return result;
 }
 
 /**

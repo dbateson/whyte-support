@@ -64,6 +64,20 @@
       "when": 1795444760766,
       "tag": "0008_attachments_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795448269612,
+      "tag": "0009_knowledge_base",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795448270254,
+      "tag": "0010_knowledge_base_extras",
+      "breakpoints": true
     }
   ]
 }

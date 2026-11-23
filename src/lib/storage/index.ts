@@ -1,6 +1,6 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { StorageClient } from "@supabase/storage-js";
@@ -17,6 +17,8 @@ import { getSetting } from "../settings";
  */
 
 export const BUCKET = "ticket-attachments";
+/** Knowledge-base imports (email exports, Zoho CSVs): any file type, private, deleted after import. */
+export const IMPORT_BUCKET = "kb-imports";
 
 export interface UploadTarget {
   /** PUT the file's bytes here, with Content-Type set. */
@@ -30,6 +32,8 @@ export interface ObjectStore {
   stat(key: string): Promise<{ size: number; contentType: string | null } | null>;
   downloadUrl(key: string, fileName: string, expiresInSeconds?: number): Promise<string>;
   remove(keys: string[]): Promise<void>;
+  /** Reads bytes [start, start + length) of an object (for large imports read in pieces). */
+  readRange(key: string, start: number, length: number): Promise<Buffer>;
 }
 
 export class StorageNotConfiguredError extends Error {
@@ -38,12 +42,12 @@ export class StorageNotConfiguredError extends Error {
   }
 }
 
-async function supabaseStore(): Promise<ObjectStore | null> {
+async function supabaseStore(bucketName: string): Promise<ObjectStore | null> {
   const url = (await getSetting("storage.supabase_url")).replace(/\/$/, "");
   const key = await getSecret("storage.service_key");
   if (!url || !key) return null;
   const client = new StorageClient(`${url}/storage/v1`, { apikey: key, Authorization: `Bearer ${key}` });
-  const bucket = client.from(BUCKET);
+  const bucket = client.from(bucketName);
   return {
     kind: "supabase",
     async createUpload(path, contentType) {
@@ -65,6 +69,16 @@ async function supabaseStore(): Promise<ObjectStore | null> {
       if (paths.length === 0) return;
       const { error } = await bucket.remove(paths);
       if (error) throw new Error(`Couldn't delete files: ${error.message}`);
+    },
+    async readRange(path, start, length) {
+      const { data, error } = await bucket.createSignedUrl(path, 120);
+      if (error || !data) throw new Error(`Couldn't read the file: ${error?.message ?? "no data"}`);
+      const res = await fetch(data.signedUrl, { headers: { range: `bytes=${start}-${start + length - 1}` } });
+      if (res.status === 416) return Buffer.alloc(0);
+      if (!res.ok) throw new Error(`Couldn't read the file: storage returned ${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      // A server that ignores Range sends the whole file: take our slice of it.
+      return res.status === 206 ? buf : buf.subarray(start, start + length);
     },
   };
 }
@@ -91,7 +105,8 @@ export function verifyLocal(action: "put" | "get", key: string, expires: number,
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function localStore(origin: string): ObjectStore {
+function localStore(origin: string, bucketName: string): ObjectStore {
+  const scoped = (key: string) => (bucketName === BUCKET ? key : `${bucketName}/${key}`);
   const link = (action: "put" | "get", key: string, ttlMs: number, extra = "") => {
     const expires = Date.now() + ttlMs;
     return `${origin}/api/dev-storage?${new URLSearchParams({ key, action, expires: String(expires), sig: signLocal(action, key, expires) })}${extra}`;
@@ -99,22 +114,32 @@ function localStore(origin: string): ObjectStore {
   return {
     kind: "local",
     async createUpload(key, contentType) {
-      return { url: link("put", key, 2 * 60 * 60 * 1000), headers: { "content-type": contentType } };
+      return { url: link("put", scoped(key), 2 * 60 * 60 * 1000), headers: { "content-type": contentType } };
     },
     async stat(key) {
       try {
-        const s = await stat(localPath(key));
-        const meta = await readFile(`${localPath(key)}.type`, "utf8").catch(() => null);
+        const s = await stat(localPath(scoped(key)));
+        const meta = await readFile(`${localPath(scoped(key))}.type`, "utf8").catch(() => null);
         return { size: s.size, contentType: meta };
       } catch {
         return null;
       }
     },
     async downloadUrl(key, fileName, expiresIn = 60) {
-      return link("get", key, expiresIn * 1000, `&name=${encodeURIComponent(fileName)}`);
+      return link("get", scoped(key), expiresIn * 1000, `&name=${encodeURIComponent(fileName)}`);
     },
     async remove(keys) {
-      await Promise.all(keys.map((k) => Promise.all([rm(localPath(k), { force: true }), rm(`${localPath(k)}.type`, { force: true })])));
+      await Promise.all(keys.map((k) => Promise.all([rm(localPath(scoped(k)), { force: true }), rm(`${localPath(scoped(k))}.type`, { force: true })])));
+    },
+    async readRange(key, start, length) {
+      const fh = await open(localPath(scoped(key)), "r");
+      try {
+        const buf = Buffer.alloc(length);
+        const { bytesRead } = await fh.read(buf, 0, length, start);
+        return buf.subarray(0, bytesRead);
+      } finally {
+        await fh.close();
+      }
     },
   };
 }
@@ -131,10 +156,10 @@ export async function readLocalObject(key: string) {
   return { body: await readFile(p), contentType: (await readFile(`${p}.type`, "utf8").catch(() => null)) ?? "application/octet-stream" };
 }
 
-/** The configured store. Falls back to local disk only outside production. */
-export async function objectStore(origin: string): Promise<ObjectStore> {
-  const store = await supabaseStore();
+/** The configured store for a bucket. Falls back to local disk only outside production. */
+export async function objectStore(origin: string, bucketName: string = BUCKET): Promise<ObjectStore> {
+  const store = await supabaseStore(bucketName);
   if (store) return store;
-  if (process.env.NODE_ENV !== "production" || process.env.WHYTE_LOCAL_STORAGE === "1") return localStore(origin);
+  if (process.env.NODE_ENV !== "production" || process.env.WHYTE_LOCAL_STORAGE === "1") return localStore(origin, bucketName);
   throw new StorageNotConfiguredError();
 }

@@ -8,6 +8,7 @@ import { requireStaff, type Staff } from "@/lib/auth/session";
 import { db, schema } from "@/lib/db";
 import { SEGMENTS, TICKET_PRIORITIES, TICKET_STATUSES, type Segment, type TicketPriority, type TicketStatus } from "@/lib/db/schema";
 import { CATEGORIES, ref } from "@/lib/tickets/format";
+import { draftFromTicket } from "@/lib/ingest/pipeline";
 import { assignableStaff, getTicketByNumber } from "@/lib/tickets/queries";
 import { addStaffMessage, createTicket, deliverStaffMessage, updateTicket, type TicketChanges } from "@/lib/tickets/service";
 
@@ -135,4 +136,20 @@ export async function createTicketAction(_: ActionState, data: FormData): Promis
     actor(staff),
   );
   redirect(`/admin/tickets/${ticket.number}?created=${encodeURIComponent(ref(ticket.number))}`);
+}
+
+/** Asks Claude to draft a knowledge-base article from this ticket's conversation (a draft for review). */
+export async function draftArticleFromTicket(_: ActionState, data: FormData): Promise<ActionState> {
+  const staff = await requireStaff("kb.edit");
+  const number = Number(data.get("number"));
+  const row = await getTicketByNumber(number);
+  if (!row || !staff.can("tickets.view", row.ticket.segment) || !staff.can("kb.edit", row.ticket.segment)) return { error: "You can't draft from this ticket." };
+  let articleId: string | null;
+  try {
+    articleId = await draftFromTicket(row.ticket.id);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Drafting failed." };
+  }
+  if (!articleId) return { error: "There's nothing reusable here yet: the ticket needs a customer question and a reply from Whyte." };
+  redirect(`/admin/kb/articles/${articleId}`);
 }

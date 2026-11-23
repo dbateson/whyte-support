@@ -39,7 +39,7 @@ import {
 } from "@/lib/tickets/format";
 import { attachmentsForTicket } from "@/lib/storage/attachments";
 import { assignableStaff, getThread, getTicketByNumber } from "@/lib/tickets/queries";
-import { assignToMe, replyToTicket, retryEmail, updateTicketDetails } from "../actions";
+import { assignToMe, draftArticleFromTicket, replyToTicket, retryEmail, updateTicketDetails } from "../actions";
 
 type Params = Promise<{ number: string }>;
 
@@ -240,6 +240,16 @@ export default async function TicketPage({ params, searchParams }: { params: Par
                 />
               )}
             </Panel>
+            {staff.can("kb.edit", ticket.segment) && (ticket.status === "resolved" || ticket.status === "closed") && (
+              <Panel title="Knowledge base" description="Resolved tickets are queued for the knowledge base automatically. Draft one now if this answer should be available straight away.">
+                <ActionForm action={draftArticleFromTicket} label="Draft an article">
+                  <input type="hidden" name="number" value={ticket.number} />
+                  <div className="ds-inline">
+                    <Button type="submit" size="small" variant="secondary">Draft an article from this ticket</Button>
+                  </div>
+                </ActionForm>
+              </Panel>
+            )}
             <Panel title="Customer">
               <DescriptionList
                 items={[

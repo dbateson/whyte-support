@@ -10,8 +10,9 @@ export const metadata: Metadata = { title: "Integrations" };
 export const dynamic = "force-dynamic";
 
 const ABOUT: Record<string, { description: string; test?: string }> = {
-  Anthropic: { description: "Claude, which powers the chatbot and drafts knowledge-base articles.", test: "anthropic" },
-  "Voyage AI": { description: "Embeddings for knowledge-base search (Phase 3)." },
+  Anthropic: { description: "Claude, which powers the chatbot and drafts knowledge-base articles from imports.", test: "anthropic" },
+  "File storage": { description: "Supabase Storage for customers' attachments and knowledge-base imports. Its URL is in General." },
+  "Voyage AI": { description: "Embeddings, so knowledge-base search matches on meaning as well as words. Optional.", test: "voyage" },
   "Zoho CRM": { description: "Two-way sync of contacts and cases (Phase 5). From a Zoho server-based client." },
   Email: { description: "Postmark: ticket replies out, customer replies in.", test: "email" },
   Shopify: { description: "The support form and chatbot on whytebikes.com (Phases 2 and 4)." },

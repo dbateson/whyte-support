@@ -30,6 +30,8 @@ export const SETTINGS = {
   "chatbot.model": "claude-haiku-5-5",
   /** The model used for one-off ingestion work (drafting KB articles from history). */
   "ingestion.model": "claude-haiku-5-5",
+  /** Voyage AI embedding model for knowledge-base search (1024 dimensions). */
+  "voyage.model": "voyage-4-lite",
   "zoho.accounts_domain": "https://accounts.zoho.eu",
   "zoho.api_domain": "https://www.zohoapis.eu",
   "turnstile.site_key": "",
