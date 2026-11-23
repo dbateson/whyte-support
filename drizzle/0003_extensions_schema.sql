@@ -15,5 +15,7 @@ BEGIN
     END IF;
   END LOOP;
   EXECUTE format('ALTER DATABASE %I SET search_path = "$user", public, extensions', current_database());
+  -- ALTER DATABASE only affects new connections; later migrations in this run need it now.
+  PERFORM set_config('search_path', '"$user", public, extensions', false);
 END
 $$;
