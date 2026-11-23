@@ -19,6 +19,10 @@ Claude for the chatbot (`claude-haiku-5-5` by default, a setting, not code).
 - `src/app/(admin)/admin/(auth)/*` — sign-in, two-step setup and verification, invitations,
   password reset. No side menu.
 - `src/app/(admin)/admin/(app)/*` — everything behind sign-in. The layout calls `requireStaff()`.
+- `src/app/api/public/*` — the public form's API (config, upload slots, submit). CORS-limited to
+  allowed origins, rate-limited, Turnstile-checked.
+- `src/embed/` — web components for other sites, bundled by `scripts/build-embed.mjs` into
+  `public/embed/` (generated; runs before `next build`).
 - `src/lib/` — server code: `env.ts` (bootstrap config), `crypto.ts`, `secrets.ts`,
   `settings.ts`, `logger.ts`, `integrations.ts` (registry of secrets and settings), `db/`,
   `auth/` (passwords, TOTP, sessions, permissions, users and roles), `tickets/` (service and
@@ -42,6 +46,8 @@ Claude for the chatbot (`claude-haiku-5-5` by default, a setting, not code).
   ticket's own segment.
 - **B2C/B2B** is a first-class field on contacts, tickets, articles and chats. Permission
   checks and bot retrieval always filter by it.
+- **Customer uploads** go straight from the browser to private storage via signed URLs and attach
+  only to the submission that requested them. Object paths never contain customer text.
 - **No credentials in URLs** (they end up in history and request logs). One-time links are
   emailed or shown once in a form response (`ActionState.reveal`).
 - **Chatbot answers** must come only from published KB article versions, and every answer
@@ -73,6 +79,12 @@ npm test               # set TEST_DATABASE_URL to run the database tests (files 
 npm run build
 npm run admin:create -- <email> "<name>" <site url>   # first admin; prints a one-time link
 ```
+
+## Environment variables
+
+`DATABASE_URL`, `APP_ENCRYPTION_KEY`, `APP_ENCRYPTION_KEY_VERSION` (and `_PREVIOUS` during a
+rotation), and `CRON_SECRET` for the nightly job. Nothing else: every integration key is in the
+encrypted store.
 
 ## Database
 
