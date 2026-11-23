@@ -42,6 +42,8 @@ export const SETTINGS = {
   "zoho.status_map": "new=New\nopen=New\npending_customer=On Hold\npending_internal=Escalated\nresolved=Closed\nclosed=Closed",
   /** Our priority → Zoho Case Priority. */
   "zoho.priority_map": "low=Low\nnormal=Medium\nhigh=High\nurgent=High",
+  /** Years a closed ticket's content is kept before it's erased (statistics stay). UK practice for warranty records: 6. */
+  "retention.ticket_years": "6",
   /** Zoho Account types that count as dealers, comma-separated. Blank: every account is a dealer. */
   "zoho.dealer_account_types": "",
   "turnstile.site_key": "",

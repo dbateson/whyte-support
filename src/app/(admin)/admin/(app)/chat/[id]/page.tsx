@@ -17,9 +17,9 @@ type Source = Chat["messages"][number]["sources"][number];
 const time = (d: Date) => d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
 
 export default async function ChatDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const staff = await requireStaff("chat.view");
   const chat = await getChat((await params).id);
-  if (!chat) notFound();
-  await requireStaff("chat.view", chat.segment);
+  if (!chat || !staff.can("chat.view", chat.segment)) notFound();
   const details = chat.details as { product?: string; frameNumber?: string; orderNumber?: string };
   const answers = chat.messages.filter((m) => m.role === "assistant");
   const tokens = answers.reduce((n, m) => n + (m.inputTokens ?? 0) + (m.outputTokens ?? 0), 0);

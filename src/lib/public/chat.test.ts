@@ -36,6 +36,18 @@ describe.skipIf(!TEST_DATABASE_URL)("public chat API", () => {
     expect(s.token.length).toBeGreaterThan(20);
   });
 
+  it("gives self-declared dealers the general articles, but sends their hand-off to the dealer team", async () => {
+    await setSecret("anthropic.api_key", "sk-ant-test", { label: "T" });
+    const r = await startChat({ segment: "b2b" }, ctx);
+    expect(r).toMatchObject({ ok: true, value: { segment: "b2b", dealerVerified: false } });
+    if (!r.ok) return;
+    expect((await sql`select segment from chat_sessions`)[0]!.segment).toBe("b2c");
+    await sendChatMessage({ sessionId: r.value.sessionId, token: r.value.token, message: "Trade price for a 905?" }, ctx);
+    expect(parse.mock.calls[0]![0].system).toContain("a rider");
+    await escalateChat({ sessionId: r.value.sessionId, token: r.value.token, name: "Sam", email: "sam@shop.example" }, ctx);
+    expect((await sql`select segment from tickets`)[0]!.segment).toBe("b2b");
+  });
+
   it("needs the session's token for every call", async () => {
     await setSecret("anthropic.api_key", "sk-ant-test", { label: "T" });
     const s = await begin();

@@ -71,6 +71,15 @@ export async function inviteUser(
   return { userId: user!.id, link, emailed };
 }
 
+/** Tells someone their account now has an authenticator, so a set-up they didn't do is noticed. */
+export async function notifyAuthenticatorAdded(user: { email: string; name: string }) {
+  await emailLink(
+    user.email,
+    "An authenticator was set up on your Whyte Support account",
+    `Hi ${user.name.split(/\s+/)[0] || "there"},\n\nAn authenticator app was just set up for two-step sign-in on your Whyte Support account.\n\nIf that wasn't you, tell an admin straight away: they can reset it and disable the account.`,
+  );
+}
+
 async function emailLink(to: string, subject: string, text: string): Promise<boolean> {
   const s = await getSettings(["email.from_address", "email.from_name"]);
   if (!s["email.from_address"]) return false;
@@ -114,6 +123,8 @@ export async function setPasswordWithToken(token: string, purpose: "invite" | "r
       .where(and(eq(schema.authTokens.id, hashToken(token)), isNull(schema.authTokens.usedAt)))
       .returning();
     if (used.length === 0) throw new Error("Link already used");
+    // Any other outstanding invite or reset links for this person stop working too.
+    await tx.delete(schema.authTokens).where(and(eq(schema.authTokens.userId, user.id), isNull(schema.authTokens.usedAt)));
     await tx
       .update(schema.users)
       .set({ passwordHash, status: "active", updatedAt: new Date(), ...(name ? { name } : {}) })

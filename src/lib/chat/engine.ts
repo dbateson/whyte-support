@@ -1,5 +1,5 @@
 import "server-only";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
@@ -17,15 +17,28 @@ export const MAX_MESSAGE_CHARS = 2000;
 const HISTORY_TURNS = 12;
 const PASSAGES = 6;
 
+/** Who the person is for routing: a self-declared dealer's hand-off goes to the dealer team. */
+const handOffSegment = (s: Session): Segment => ((s.details as { requestedSegment?: Segment }).requestedSegment ?? s.segment);
+
 const hashToken = (t: string) => createHash("sha256").update(`chat:${t}`).digest("hex");
 
 export type Session = typeof schema.chatSessions.$inferSelect;
 
-export async function startSession(input: { segment: Segment; origin: string; shopifyCustomerId?: string | null }): Promise<{ session: Session; token: string }> {
+/**
+ * `segment` decides which articles the assistant may use (b2b only for verified dealers);
+ * `requestedSegment` is who the person said they are, for the hand-off and the phone number.
+ */
+export async function startSession(input: { segment: Segment; origin: string; shopifyCustomerId?: string | null; requestedSegment?: Segment }): Promise<{ session: Session; token: string }> {
   const token = randomBytes(24).toString("base64url");
   const [session] = await db()
     .insert(schema.chatSessions)
-    .values({ tokenHash: hashToken(token), segment: input.segment, origin: input.origin.slice(0, 300), shopifyCustomerId: input.shopifyCustomerId ?? null })
+    .values({
+      tokenHash: hashToken(token),
+      segment: input.segment,
+      origin: input.origin.slice(0, 300),
+      shopifyCustomerId: input.shopifyCustomerId ?? null,
+      details: input.requestedSegment && input.requestedSegment !== input.segment ? { requestedSegment: input.requestedSegment } : {},
+    })
     .returning();
   return { session: session!, token };
 }
@@ -37,7 +50,10 @@ export async function openSession(id: string, token: string): Promise<Session | 
   if (!s) return null;
   const a = Buffer.from(s.tokenHash);
   const b = Buffer.from(hashToken(token));
-  return a.length === b.length && a.equals(b) ? s : null;
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  // A chat left for a day is over: a new one starts (the transcript stays for staff).
+  if (Date.now() - s.lastMessageAt.getTime() > 24 * 60 * 60 * 1000) return null;
+  return s;
 }
 
 export interface ReplySource {
@@ -91,7 +107,7 @@ export async function answer(session: Session, question: string): Promise<Reply>
   const passages: Passage[] = hits.map((h, i) => ({ label: `P${i + 1}`, heading: h.heading, content: h.content }));
 
   const s = await getSettings(["chatbot.model", "support.phone.b2c", "support.phone.b2b"]);
-  const phone = (session.segment === "b2b" ? s["support.phone.b2b"] : s["support.phone.b2c"]) || null;
+  const phone = (handOffSegment(session) === "b2b" ? s["support.phone.b2b"] : s["support.phone.b2c"]) || null;
 
   let outcome: ChatOutcome;
   let reply: string;
@@ -242,7 +258,7 @@ export async function escalate(session: Session, input: { name: string; email: s
   const category = CATEGORY_HINTS.find(([re]) => re.test(`${firstQuestion} ${input.note ?? ""}`))?.[1] ?? null;
   const { ticket } = await createTicketWithMessage(
     {
-      segment: session.segment,
+      segment: handOffSegment(session),
       subject: firstQuestion.replace(/\s+/g, " ").slice(0, 120),
       body,
       source: "chat",
@@ -257,7 +273,7 @@ export async function escalate(session: Session, input: { name: string; email: s
     { label: "Chatbot" },
   );
   await db().update(schema.chatSessions).set({ status: "escalated", ticketId: ticket.id }).where(eq(schema.chatSessions.id, session.id));
-  await sendAcknowledgement(ticket, { name: input.name, email: input.email }, input.note?.trim() || firstQuestion, 0);
+  await sendAcknowledgement(ticket, { name: input.name, email: input.email }, 0);
   return { reference: `WS-${ticket.number}` };
 }
 

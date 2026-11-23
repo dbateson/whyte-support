@@ -21,6 +21,7 @@ import { customerTokenKey } from "./submission";
 type Result<T> = { ok: true; value: T } | { ok: false; status: number; error: string };
 const fail = (status: number, error: string) => ({ ok: false as const, status, error });
 const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
 
 const Auth = z.object({ sessionId: z.string().uuid(), token: z.string().min(10).max(200) });
 
@@ -39,25 +40,34 @@ const Start = z.object({
   shopifyToken: z.string().max(1000).optional(),
 });
 
-export async function startChat(body: unknown, ctx: { ip: string; origin: string }): Promise<Result<{ sessionId: string; token: string; segment: "b2c" | "b2b"; phone: string | null }>> {
+export async function startChat(
+  body: unknown,
+  ctx: { ip: string; origin: string },
+): Promise<Result<{ sessionId: string; token: string; segment: "b2c" | "b2b"; dealerVerified: boolean; phone: string | null }>> {
   const p = Start.safeParse(body);
   if (!p.success) return fail(400, "Something was missing from the request.");
   if (!(await chatAvailable())) return fail(503, "The assistant isn't available right now.");
-  if (!(await allow("chat-start-ip", ctx.ip, 20, HOUR))) return fail(429, "Too many new chats from your connection. Please try again later.");
+  if (!(await allow("chat-start-ip", ctx.ip, 20, HOUR)) || !(await allow("chat-start-ip-day", ctx.ip, 60, DAY))) return fail(429, "Too many new chats from your connection. Please try again later.");
   const turnstile = await verifyTurnstile(p.data.turnstileToken, ctx.ip);
   if (turnstile === "failed") return fail(400, "We couldn't confirm you're not a robot. Please try again.");
+  if (turnstile === "not-configured" && process.env.NODE_ENV === "production" && !(await allow("chat-start-ip-unchecked", ctx.ip, 5, HOUR))) {
+    return fail(429, "Too many new chats from your connection. Please try again later.");
+  }
 
-  // A signed-in Shopify customer is verified; anyone else is as they say. Dealer
-  // articles aren't secret, so a self-declared dealer is fine, but a verified one is recorded.
-  let segment = p.data.segment;
+  // Dealer-only articles go only to dealers Shopify confirms (signed in, tagged as trade).
+  // Anyone else who says they're a dealer gets the general articles; their hand-off still
+  // goes to the dealer team.
+  let dealerVerified = false;
   const shopifyCustomerId = readCustomerToken(p.data.shopifyToken, customerTokenKey());
   if (shopifyCustomerId) {
     const customer = await fetchShopifyCustomer(shopifyCustomerId).catch(() => null);
-    if (customer?.isDealer) segment = "b2b";
+    dealerVerified = Boolean(customer?.isDealer);
   }
-  const { session, token } = await startSession({ segment, origin: ctx.origin, shopifyCustomerId });
+  const segment = dealerVerified ? "b2b" : "b2c";
+  const requested = dealerVerified || p.data.segment === "b2b" ? "b2b" : "b2c";
+  const { session, token } = await startSession({ segment, origin: ctx.origin, shopifyCustomerId, requestedSegment: requested });
   const s = await getSettings(["support.phone.b2c", "support.phone.b2b"]);
-  return { ok: true, value: { sessionId: session.id, token, segment, phone: (segment === "b2b" ? s["support.phone.b2b"] : s["support.phone.b2c"]) || null } };
+  return { ok: true, value: { sessionId: session.id, token, segment: requested, dealerVerified, phone: (requested === "b2b" ? s["support.phone.b2b"] : s["support.phone.b2c"]) || null } };
 }
 
 const Message = Auth.extend({ message: z.string().trim().min(1).max(MAX_MESSAGE_CHARS) });
@@ -78,7 +88,9 @@ export async function sendChatMessage(body: unknown, ctx: { ip: string }): Promi
   const session = await authed(p.data);
   if (!session) return fail(401, "This chat has expired. Please start a new one.");
   if (session.status !== "open") return fail(409, "This chat has been passed to the team. They'll reply by email.");
-  if (!(await allow("chat-msg-session", session.id, 30, HOUR)) || !(await allow("chat-msg-ip", ctx.ip, 80, HOUR))) {
+  // Per chat, per connection per hour and per day: well under the site-wide daily answer limit,
+  // so no single client can use it all up.
+  if (!(await allow("chat-msg-session", session.id, 30, HOUR)) || !(await allow("chat-msg-ip", ctx.ip, 40, HOUR)) || !(await allow("chat-msg-ip-day", ctx.ip, 150, DAY))) {
     return fail(429, "That's a lot of questions in a short time. Please wait a little, or send them to the team.");
   }
   if (await overDailyLimit()) {

@@ -225,10 +225,32 @@ async function importZoho(job: Job, origin: string): Promise<boolean> {
   return true;
 }
 
-async function fetchText(url: string, timeoutMs = 10_000): Promise<string> {
-  const res = await fetch(url, { headers: { "user-agent": "WhyteSupportKnowledgeBase/1.0", accept: "text/html,application/xml" }, signal: AbortSignal.timeout(timeoutMs), redirect: "follow" });
-  if (!res.ok) throw new Error(`${url} returned ${res.status}`);
-  return res.text();
+/**
+ * Fetches a page of the site being imported. Every URL, including each
+ * redirect hop, must be on the sitemap's own origin (whytebikes.com in
+ * production), so a sitemap entry or redirect can't point the crawler at
+ * internal addresses.
+ */
+async function fetchText(url: string, origin: string, timeoutMs = 10_000): Promise<string> {
+  let current = url;
+  for (let hop = 0; hop < 4; hop++) {
+    let u: URL;
+    try {
+      u = new URL(current);
+    } catch {
+      throw new Error(`Not a web address: ${current}`);
+    }
+    if (u.origin !== origin) throw new Error(`Skipped ${u.origin}: only ${origin} is imported`);
+    const res = await fetch(u, { headers: { "user-agent": "WhyteSupportKnowledgeBase/1.0", accept: "text/html,application/xml" }, signal: AbortSignal.timeout(timeoutMs), redirect: "manual" });
+    if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
+      current = new URL(res.headers.get("location")!, u).toString();
+      continue;
+    }
+    if (!res.ok) throw new Error(`${u.toString()} returned ${res.status}`);
+    const text = await res.text();
+    return text.length > 5_000_000 ? text.slice(0, 5_000_000) : text;
+  }
+  throw new Error(`Too many redirects from ${url}`);
 }
 
 const TYPE_PATHS: Record<WebParams["include"][number], RegExp> = { pages: /\/pages\//, products: /\/products\//, blogs: /\/blogs\// };
@@ -236,16 +258,17 @@ const TYPE_PATHS: Record<WebParams["include"][number], RegExp> = { pages: /\/pag
 async function importWeb(job: Job, deadline: number): Promise<boolean> {
   const p = job.params as unknown as WebParams;
   let urls = p.urls;
+  const origin = new URL(p.sitemapUrl).origin;
   if (!urls) {
     // Read the sitemap (Shopify serves an index of per-type sitemaps).
-    const root = parseSitemap(await fetchText(p.sitemapUrl));
+    const root = parseSitemap(await fetchText(p.sitemapUrl, origin));
     const pages = [...root.pages];
     for (const sm of root.sitemaps) {
       const type = /sitemap_(\w+?)_\d/.exec(sm)?.[1];
       if (type && !(p.include as string[]).includes(type)) continue;
-      pages.push(...parseSitemap(await fetchText(sm)).pages);
+      pages.push(...parseSitemap(await fetchText(sm, origin)).pages);
     }
-    urls = [...new Set(pages.filter((u) => p.include.some((t) => TYPE_PATHS[t].test(u))))].slice(0, MAX_WEB_PAGES);
+    urls = [...new Set(pages.filter((u) => u.startsWith(`${origin}/`) && p.include.some((t) => TYPE_PATHS[t].test(u))))].slice(0, MAX_WEB_PAGES);
     await setJob(job.id, { params: { ...p, urls, index: 0 }, stats: { ...(job.stats as object), pagesFound: urls.length } });
   }
   let i = p.index ?? 0;
@@ -254,7 +277,7 @@ async function importWeb(job: Job, deadline: number): Promise<boolean> {
     const pages = await Promise.all(
       batch.map(async (url) => {
         try {
-          const { title, text } = htmlToText(await fetchText(url));
+          const { title, text } = htmlToText(await fetchText(url, origin));
           return text.length > 200 ? { url, title, text } : null;
         } catch (err) {
           log.warn("Couldn't fetch a page", { url, err });

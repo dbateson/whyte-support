@@ -37,7 +37,7 @@ Settings → Integrations. They are never put in `.env`.
 | 4 | Chatbot and Shopify embed (done) |
 | 5 | Zoho CRM two-way sync (done) |
 | 6 | Analytics dashboard (done) |
-| 7 | GDPR tooling and hardening |
+| 7 | GDPR tooling and hardening (done) |
 
 ## File storage (attachments)
 
@@ -145,6 +145,35 @@ tickets imported from Zoho:
   covers, by category.
 - **Experience:** customers who wrote more than once, tickets reopened by a reply, tickets open over
   a week, and tickets waiting over a day for a first reply.
+
+## Privacy (UK GDPR)
+
+- **Requests:** Admin → Settings → Privacy requests (permission *Export and erase customer data*).
+  Find a person by email, then:
+  - **Export** downloads everything held about them as JSON: details, every ticket and message
+    (internal notes flagged, to review before sending), file names, and chats that became tickets.
+  - **Erase** removes their name and contact details, every message on their tickets, their files
+    and those chats. Ticket dates, categories and statuses stay, without anything personal, for
+    statistics. With Zoho connected, a task is created in Zoho to erase its copy (Zoho owns it).
+  Both are recorded in the audit log with a fingerprint of the email, not the address.
+- **Retention** (nightly): closed tickets are erased the same way after the years set in
+  Settings → General (default 6); people with nothing else left are blanked. Chats are deleted after
+  12 months, sync logs after 30 days, unused imported text after 90 days, sign-in records after 30.
+- Erased people are never refilled from Zoho.
+
+## Security notes
+
+- Secrets live only in the encrypted store (Settings → Integrations); the environment holds only
+  `DATABASE_URL`, `APP_ENCRYPTION_KEY` (+ `_VERSION`, `_PREVIOUS` while rotating) and `CRON_SECRET`.
+  Never set `WHYTE_LOCAL_STORAGE` in production (it enables a development-only file store).
+- Set **Settings → General → Support site address** before go-live: links in emails use it.
+- Dealer-only articles reach only dealers Shopify confirms (signed in, tagged as trade). An
+  unapproved draft can't change who sees a published article.
+- Staff can only give out (invite, roles, role edits) permissions they hold themselves.
+- Headers: Content-Security-Policy, HSTS, `frame-ancestors 'none'`, nosniff, a strict referrer and
+  permissions policy on every page except the embed scripts.
+- Imported emails and tickets are untrusted text: drafts written from them always wait for review,
+  so check links and instructions in drafts before publishing.
 
 ## Scheduled jobs
 

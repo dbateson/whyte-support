@@ -75,7 +75,11 @@ export async function submitPublicTicket(raw: unknown, ctx: { ip: string; origin
   }
   const turnstile = await verifyTurnstile(f.turnstileToken, ctx.ip);
   if (turnstile === "failed") return { ok: false, status: 400, error: "We couldn't confirm you're not a robot. Please try again." };
-  if (turnstile === "not-configured" && process.env.NODE_ENV === "production") log.warn("Turnstile isn't set up: the public form is protected by rate limits only");
+  if (turnstile === "not-configured" && process.env.NODE_ENV === "production") {
+    // Without the robot check, a much tighter limit per connection.
+    log.warn("Turnstile isn't set up: the public form is protected by rate limits only");
+    if (!(await allow("submit-ip-unchecked", ctx.ip, 3, 60 * 60 * 1000))) return { ok: false, status: 429, error: "Too many requests from your connection. Please try again later." };
+  }
 
   // A signed-in Shopify customer (via the App Proxy page) is verified; everyone else is as they say.
   let segment = f.segment;
@@ -106,6 +110,6 @@ export async function submitPublicTicket(raw: unknown, ctx: { ip: string; origin
     { label: "Support form" },
   );
   const attached = await attachUploads(f.attachments, f.claimKey, ticket.id, message.id, ctx.origin);
-  await sendAcknowledgement(ticket, { name: f.name, email: f.email }, f.details, attached.length);
+  await sendAcknowledgement(ticket, { name: f.name, email: f.email }, attached.length);
   return { ok: true, reference: `WS-${ticket.number}`, attached: attached.length };
 }

@@ -147,6 +147,12 @@ describe.skipIf(!TEST_DATABASE_URL)("inbound email", () => {
     const spoof = await fileInboundEmail({ ...base, FromFull: { Email: "someone@else.test" }, Headers: [{ Name: "Message-ID", Value: "<a3@mail>" }] });
     expect(spoof.outcome).toBe("created");
     expect(spoof.ticketNumber).toBe(10002);
+    // The contact's own address, but SPF failed: a forged From, so not added to their ticket.
+    const forged = await fileInboundEmail({ ...base, Headers: [{ Name: "Message-ID", Value: "<a4@mail>" }, { Name: "Received-SPF", Value: "Fail (sender not permitted)" }] });
+    expect(forged.outcome).toBe("created");
+    // Malformed Message-IDs are dropped rather than copied into our replies' headers.
+    await fileInboundEmail({ ...base, Headers: [{ Name: "Message-ID", Value: "<a5@mail>\r\nBcc: x@y" }, { Name: "Received-SPF", Value: "Pass" }] });
+    expect((await sql`select count(*)::int as n from ticket_messages where email_message_id like '%Bcc%'`)[0]!.n).toBe(0);
   });
 
   it("ignores duplicates and auto-replies, and starts new tickets", async () => {

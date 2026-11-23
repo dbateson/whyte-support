@@ -34,7 +34,9 @@ export async function fileInboundEmail(e: InboundEmail): Promise<InboundResult> 
   const auto = header(e, "Auto-Submitted");
   if ((auto && auto.toLowerCase() !== "no") || /^(mailer-daemon|postmaster|no-?reply)@/i.test(fromEmail)) return { outcome: "ignored" };
 
-  const messageId = header(e, "Message-ID") ?? (e.MessageID ? `<${e.MessageID}@inbound>` : null);
+  // Only a well-formed Message-ID is kept: it's later copied into our replies' headers.
+  const rawId = header(e, "Message-ID") ?? (e.MessageID ? `<${e.MessageID}@inbound>` : null);
+  const messageId = rawId && /^<[^<>\s]{1,250}>$/.test(rawId.trim()) ? rawId.trim() : null;
   if (messageId) {
     const [dupe] = await db().select({ id: schema.ticketMessages.id }).from(schema.ticketMessages).where(eq(schema.ticketMessages.emailMessageId, messageId));
     if (dupe) return { outcome: "duplicate" };
@@ -82,8 +84,11 @@ async function matchTicket(e: InboundEmail, fromEmail: string) {
     .from(schema.tickets)
     .leftJoin(schema.contacts, eq(schema.contacts.id, schema.tickets.contactId))
     .where(eq(schema.tickets.number, number));
-  // Headers and subjects can be forged, so they only count when the sender is the ticket's contact.
-  if (row && row.email?.toLowerCase() === fromEmail) return row.ticket;
+  // Headers, subjects and From can all be forged, so they only count when the sender is the
+  // ticket's contact and their domain's SPF check passed (Postmark adds Received-SPF).
+  const spf = header(e, "Received-SPF")?.trim().toLowerCase();
+  const senderVerified = spf === undefined || spf.startsWith("pass");
+  if (row && row.email?.toLowerCase() === fromEmail && senderVerified) return row.ticket;
   if (row) log.info("Inbound email referenced a ticket from a different sender; filing as new", { ticket: number });
   return null;
 }

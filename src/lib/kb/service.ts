@@ -76,11 +76,17 @@ export async function saveDraft(
   return database.transaction(async (tx) => {
     const { article, working } = await load(tx, articleId);
     if (article.retiredAt) throw new KbError("Restore the article before editing it.");
-    await tx.update(schema.kbArticles).set({ audience: edit.audience, category: edit.category, updatedAt: new Date() }).where(eq(schema.kbArticles.id, articleId));
+    // A live article keeps its audience until the change is approved and published.
+    const live = Boolean(article.publishedVersionId);
+    const pendingAudience = live && edit.audience !== article.audience ? edit.audience : null;
+    await tx
+      .update(schema.kbArticles)
+      .set({ ...(live ? {} : { audience: edit.audience }), category: edit.category, updatedAt: new Date() })
+      .where(eq(schema.kbArticles.id, articleId));
     if (working) {
       const [v] = await tx
         .update(schema.kbArticleVersions)
-        .set({ title: edit.title.trim(), body: edit.body.trim(), status: "draft", submittedAt: null, updatedAt: new Date() })
+        .set({ title: edit.title.trim(), body: edit.body.trim(), audience: pendingAudience, status: "draft", submittedAt: null, updatedAt: new Date() })
         .where(eq(schema.kbArticleVersions.id, working.id))
         .returning();
       return v!;
@@ -88,7 +94,7 @@ export async function saveDraft(
     const [{ n } = { n: 0 }] = await tx.select({ n: max(schema.kbArticleVersions.number) }).from(schema.kbArticleVersions).where(eq(schema.kbArticleVersions.articleId, articleId));
     const [v] = await tx
       .insert(schema.kbArticleVersions)
-      .values({ articleId, number: (n ?? 0) + 1, title: edit.title.trim(), body: edit.body.trim(), createdBy: actor.id ?? null, authorLabel: actor.label })
+      .values({ articleId, number: (n ?? 0) + 1, title: edit.title.trim(), body: edit.body.trim(), audience: pendingAudience, createdBy: actor.id ?? null, authorLabel: actor.label })
       .returning();
     await tx.update(schema.kbArticles).set({ workingVersionId: v!.id }).where(eq(schema.kbArticles.id, articleId));
     return v!;
@@ -150,8 +156,9 @@ export async function publish(articleId: string, actor: Actor, database: Db = db
       .set({ status: "published", reviewedBy: actor.id ?? null, reviewedAt: new Date(), reviewNote: null })
       .where(eq(schema.kbArticleVersions.id, working.id))
       .returning();
-    await tx.update(schema.kbArticles).set({ publishedVersionId: working.id, workingVersionId: null, updatedAt: new Date() }).where(eq(schema.kbArticles.id, articleId));
-    await rebuildChunks(tx, articleId, v!, article.audience);
+    const audience = working.audience ?? article.audience;
+    await tx.update(schema.kbArticles).set({ publishedVersionId: working.id, workingVersionId: null, audience, updatedAt: new Date() }).where(eq(schema.kbArticles.id, articleId));
+    await rebuildChunks(tx, articleId, v!, audience);
     await audit(tx, actor, "kb.publish", articleId, { version: v!.number, title: v!.title });
     return v!;
   });
@@ -211,11 +218,6 @@ export async function restore(articleId: string, actor: Actor, database: Db = db
     await audit(tx, actor, "kb.restore", articleId);
   });
   await embedArticle(articleId, database).catch(() => undefined);
-}
-
-/** When an article's audience changes after publishing, its passages follow. */
-export async function syncChunkAudience(articleId: string, audience: KbAudience, database: Db = db()) {
-  await database.update(schema.kbChunks).set({ audience }).where(eq(schema.kbChunks.articleId, articleId));
 }
 
 /* ---------- Reading ---------- */

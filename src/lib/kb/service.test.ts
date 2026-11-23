@@ -55,6 +55,18 @@ describe.skipIf(!TEST_DATABASE_URL)("knowledge base", () => {
     expect(a?.sources[0]).toMatchObject({ kind: "ticket", reference: "WS-10001" });
   });
 
+  it("keeps a live article's audience until an audience change is published", async () => {
+    const { article } = await createArticle({ title: "Trade warranty claims", audience: "b2b", body: "Dealers lodge claims through the trade portal with photos." }, actor);
+    await publish(article.id, actor);
+    await saveDraft(article.id, { title: "Trade warranty claims", body: "Dealers lodge claims through the trade portal with photos.", audience: "both", category: null }, actor);
+    // Saved, not approved: riders still can't find it.
+    expect((await getArticle(article.id))!.article.audience).toBe("b2b");
+    expect(await searchKb("trade portal claims", "b2c", 5)).toEqual([]);
+    await publish(article.id, actor);
+    expect((await getArticle(article.id))!.article.audience).toBe("both");
+    expect((await searchKb("trade portal claims", "b2c", 5)).length).toBeGreaterThan(0);
+  });
+
   it("refuses to publish an empty article and to submit twice", async () => {
     const { article } = await createArticle({ title: "Stub", body: "tiny", audience: "both" }, actor);
     await expect(publish(article.id, actor)).rejects.toBeInstanceOf(KbError);

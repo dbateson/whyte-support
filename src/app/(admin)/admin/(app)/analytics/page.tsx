@@ -16,15 +16,18 @@ const pct = (v: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`
 type Question = Awaited<ReturnType<typeof unansweredQuestions>>[number];
 
 export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  await requireStaff("analytics.view");
+  const staff = await requireStaff("analytics.view");
   const range = parseRange(await searchParams);
+  // Figures are for everyone with analytics; customers' own words only for segments this person may read chats in.
+  const chatSegments = staff.segmentsFor("chat.view");
+  const questionRange = range.segment ? (chatSegments.includes(range.segment) ? range : null) : chatSegments.length === 2 ? range : chatSegments.length === 1 ? { ...range, segment: chatSegments[0] } : null;
   const [now, before, vol, parts, topicRows, questions, gaps, exp] = await Promise.all([
     summary(range),
     summary(previousRange(range)),
     volume(range),
     breakdowns(range),
     topics(range),
-    unansweredQuestions(range),
+    questionRange ? unansweredQuestions(questionRange) : Promise.resolve([]),
     uncovered(range),
     experience(range),
   ]);
@@ -118,7 +121,10 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
       <CardGrid label="Gaps">
         <GridItem span={8}>
-          <Panel title="Questions the assistant couldn't answer" description="Most asked first. Each is a candidate for a new article.">
+          <Panel
+            title="Questions the assistant couldn't answer"
+            description={questionRange ? `Most asked first. Each is a candidate for a new article.${questionRange.segment && !range.segment ? ` ${questionRange.segment === "b2b" ? "Dealer" : "Rider"} chats only: the ones your role can read.` : ""}` : "Your role can't read customers' chats, so these aren't shown."}
+          >
             <DataTable label="Unanswered questions" columns={questionColumns} rows={questions} rowKey={(q) => q.question} total={questions.length} noun="questions" empty={<EmptyState title="None in these dates" />} />
           </Panel>
         </GridItem>
