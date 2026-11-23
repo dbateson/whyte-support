@@ -36,7 +36,7 @@ Settings → Integrations. They are never put in `.env`.
 | 3 | Knowledge base and ingestion (emails, Zoho, whytebikes.com) (done) |
 | 4 | Chatbot and Shopify embed (done) |
 | 5 | Zoho CRM two-way sync (done) |
-| 6 | Analytics dashboard |
+| 6 | Analytics dashboard (done) |
 | 7 | GDPR tooling and hardening |
 
 ## File storage (attachments)
@@ -127,6 +127,24 @@ Check the setup, then switch sync on.
   background.
 - Status and priority mappings are editable on the Zoho page and checked against Zoho's picklists.
 - Records deleted in Zoho are not deleted here; the sync log shows a warning.
+
+## Analytics
+
+Analytics (permission *View analytics*) covers any date range and either segment, including
+tickets imported from Zoho:
+
+- **Headline figures** with change against the previous period: tickets, median first reply,
+  share replied to within 24 hours, median time to resolve, share of chats the assistant answered
+  without a hand-off, and questions it couldn't answer.
+- **Trends:** tickets (riders and dealers) and chats per day, week or month; by category, bike
+  model and source; median time to resolve by category.
+- **Automation candidates:** each published article as a topic, with the tickets about it
+  (all words of its title appear in the ticket) and the chats answered from it, and what that
+  suggests (point customers at it, add detail, review it).
+- **Gaps:** the questions the assistant couldn't answer, most asked first, and tickets no article
+  covers, by category.
+- **Experience:** customers who wrote more than once, tickets reopened by a reply, tickets open over
+  a week, and tickets waiting over a day for a first reply.
 
 ## Scheduled jobs
 
