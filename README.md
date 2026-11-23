@@ -33,7 +33,7 @@ Settings → Integrations. They are never put in `.env`.
 | 0 | Foundations: scaffold, design system, database, encrypted secrets store, CI (done) |
 | 1 | Ticketing core, staff auth and roles, settings screen, email (done) |
 | 2 | Public support form (web component and Shopify App Proxy) (done) |
-| 3 | Knowledge base and ingestion (emails, Zoho, whytebikes.com) |
+| 3 | Knowledge base and ingestion (emails, Zoho, whytebikes.com) (done) |
 | 4 | Chatbot and Shopify embed |
 | 5 | Zoho CRM two-way sync |
 | 6 | Analytics dashboard |
@@ -69,3 +69,22 @@ Two ways, both using the same form and API:
 `vercel.json` runs `/api/cron/cleanup` nightly (abandoned uploads, expired sessions and links,
 old rate-limit rows). Set a `CRON_SECRET` environment variable in Vercel; the route refuses
 requests without it.
+
+## Knowledge base
+
+- **Articles** are for riders (B2C), dealers (B2B) or both. Every edit is a new version; the chatbot
+  reads only the published one. Editors send drafts for review; approvers publish or send them back.
+- **Import** (Knowledge base → Import) turns history into draft articles:
+  - *Past support emails*: an `.mbox` export (or `.eml` files). Give Whyte's email domains so
+    replies are told apart from customers.
+  - *Zoho CRM cases*: Cases → Export as CSV.
+  - *whytebikes.com*: reads the sitemap (pages, products, blog posts).
+  Personal details are removed before anything is stored or sent to Claude, uploaded files are
+  deleted once read, and unused imported text is deleted after 90 days. A topic answered at least
+  twice becomes one draft. Drafts list anything the sources didn't settle; delete that section
+  before publishing.
+- **Resolved tickets** are queued automatically; "Draft an article from this ticket" does one now.
+- **Search** is full text, plus meaning when a Voyage AI key is set (Integrations). Knowledge base →
+  Test search shows which passages the chatbot would be given for a question.
+- Uploads over 50 MB need Supabase's project upload limit raised (Storage → Settings), or the
+  export split into smaller files.

@@ -51,7 +51,10 @@ Claude for the chatbot (`claude-haiku-5-5` by default, a setting, not code).
 - **No credentials in URLs** (they end up in history and request logs). One-time links are
   emailed or shown once in a form response (`ActionState.reveal`).
 - **Chatbot answers** must come only from published KB article versions, and every answer
-  stores the article versions it cited.
+  stores the article versions it cited. Retrieval is `searchKb` (src/lib/kb/queries.ts): published
+  passages only, filtered by audience.
+- **Imported text is untrusted.** Redact it (src/lib/ingest/redact.ts) before storing or sending it
+  to a model, and keep model output structured (Zod schemas) and reviewed by staff before use.
 - **GDPR:** customer personal data never goes into logs, KB articles or analytics exports.
   Anything that stores personal data needs a retention rule.
 
