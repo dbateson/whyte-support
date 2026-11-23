@@ -55,6 +55,7 @@ const EVENT_TEXT: Record<string, (from: string | null, to: string | null) => str
   segment: (_, to) => `moved it to ${to}`,
   category: (_, to) => (to ? `set the category to ${to}` : "cleared the category"),
   reopened: () => "reopened it: the customer replied",
+  zoho: (from, to) => `changed ${to} in Zoho. This app manages these, so Zoho was set back to ${from}`,
 };
 
 export default async function TicketPage({ params, searchParams }: { params: Params; searchParams: Promise<{ created?: string }> }) {
@@ -62,7 +63,7 @@ export default async function TicketPage({ params, searchParams }: { params: Par
   const number = parseRef((await params).number);
   const row = number ? await getTicketByNumber(number) : null;
   if (!row || !staff.can("tickets.view", row.ticket.segment)) notFound();
-  const { ticket, contact } = row;
+  const { ticket, contact, account } = row;
   const { created } = await searchParams;
   const [thread, people, attachments] = await Promise.all([getThread(ticket.id), assignableStaff(ticket.segment), attachmentsForTicket(ticket.id)]);
   const filesFor = (messageId: string) => attachments.filter((a) => a.messageId === messageId);
@@ -258,6 +259,8 @@ export default async function TicketPage({ params, searchParams }: { params: Par
                   { term: "Phone", detail: contact?.phone ?? "None" },
                   ...(contact?.companyName ? [{ term: "Business", detail: contact.companyName }] : []),
                   ...(contact?.accountCode ? [{ term: "Account number", detail: contact.accountCode }] : []),
+                  ...(account ? [{ term: "Dealer account (Zoho)", detail: `${account.name}${account.accountNumber ? ` · ${account.accountNumber}` : ""}` }] : []),
+                  ...(ticket.zohoCaseNumber ? [{ term: "Zoho case", detail: ticket.zohoCaseNumber }] : []),
                   ...(contact?.shopifyCustomerId ? [{ term: "Shopify", detail: "Signed in when they wrote" }] : []),
                   ...(ticket.purchasedFrom ? [{ term: "Bought from", detail: ticket.purchasedFrom }] : []),
                   ...(ticket.orderNumber ? [{ term: "Order number", detail: ticket.orderNumber }] : []),

@@ -42,6 +42,7 @@ export function AdminNav({
   const settings = [
     show.settings && { href: "/admin/settings/integrations", label: "Integrations" },
     show.settings && { href: "/admin/settings/general", label: "General" },
+    show.settings && { href: "/admin/settings/zoho", label: "Zoho CRM" },
     show.users && { href: "/admin/settings/users", label: "Users" },
     show.users && { href: "/admin/settings/roles", label: "Roles" },
     show.audit && { href: "/admin/settings/audit", label: "Audit log" },
