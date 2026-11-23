@@ -1,0 +1,60 @@
+/**
+ * Every secret and setting the admin settings screen manages. Code reads
+ * integration keys only through `getSecret(name)` with a name from here.
+ */
+
+export const SECRETS = {
+  "anthropic.api_key": { integration: "Anthropic", label: "API key" },
+  "voyage.api_key": { integration: "Voyage AI", label: "API key" },
+  "zoho.client_id": { integration: "Zoho CRM", label: "Client ID" },
+  "zoho.client_secret": { integration: "Zoho CRM", label: "Client secret" },
+  "zoho.refresh_token": { integration: "Zoho CRM", label: "Refresh token" },
+  "zoho.webhook_token": { integration: "Zoho CRM", label: "Notification token" },
+  "email.server_token": { integration: "Email", label: "Server API token" },
+  "email.inbound_secret": { integration: "Email", label: "Inbound webhook secret" },
+  "shopify.api_secret": { integration: "Shopify", label: "App API secret (verifies App Proxy requests)" },
+  "shopify.admin_token": { integration: "Shopify", label: "Admin API access token" },
+  "turnstile.secret_key": { integration: "Cloudflare Turnstile", label: "Secret key" },
+  "storage.service_key": { integration: "File storage", label: "Supabase secret key (server only)" },
+} as const;
+
+export type SecretName = keyof typeof SECRETS;
+
+export function isSecretName(name: string): name is SecretName {
+  return Object.hasOwn(SECRETS, name);
+}
+
+/** Non-secret settings and their defaults. */
+export const SETTINGS = {
+  /** The chatbot's model. Haiku keeps per-conversation cost low; change here, no deploy. */
+  "chatbot.model": "claude-haiku-5-5",
+  /** The model used for one-off ingestion work (drafting KB articles from history). */
+  "ingestion.model": "claude-haiku-5-5",
+  "zoho.accounts_domain": "https://accounts.zoho.eu",
+  "zoho.api_domain": "https://www.zohoapis.eu",
+  "turnstile.site_key": "",
+  "support.phone.b2c": "",
+  "support.phone.b2b": "",
+  /** Where links in emails point: the support site's address, e.g. https://support.whytebikes.com. */
+  "app.public_url": "",
+  /** Sender for ticket emails; the domain must be verified with the email provider. */
+  "email.from_address": "",
+  "email.from_name": "Whyte Bikes Support",
+  /**
+   * The provider's inbound address (Postmark: <hash>@inbound.postmarkapp.com). Replies go to
+   * <hash>+<ticket key>@..., so they land on the right ticket.
+   */
+  "email.inbound_address": "",
+  /** Supabase project URL for file storage (attachments), e.g. https://abcd.supabase.co */
+  "storage.supabase_url": "",
+  /** Sites allowed to embed the form and chat, comma-separated origins. */
+  "embed.allowed_origins": "https://www.whytebikes.com,https://whytebikes.com",
+  /** The shop's myshopify.com domain, which signs App Proxy requests. */
+  "shopify.shop_domain": "",
+  /** Shopify customer tag that marks a dealer (B2B) account. */
+  "shopify.b2b_tag": "trade",
+  /** Linked from the form's privacy line. */
+  "support.privacy_url": "https://whytebikes.com/policies/privacy-policy",
+} as const satisfies Record<string, string>;
+
+export type SettingKey = keyof typeof SETTINGS;
