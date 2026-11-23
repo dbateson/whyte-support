@@ -61,10 +61,10 @@ Claude for the chatbot (`claude-haiku-5-5` by default, a setting, not code).
   that it should own; if something is missing, flag it and add it to
   `dbateson/whyte-design-system` (with its reference-page card) rather than building it here.
 - The design system has no base stylesheet: each root layout puts `ds-body` on `<body>`.
-- To update it: in the design-system repo run `npm pack`, replace the tarball in `vendor/`,
-  update the `file:` path in `package.json`, `npm install`. If the version number didn't
-  change, npm reuses its cached copy: delete the package's `integrity` line in
-  `package-lock.json` and `node_modules/@whyte`, then install again.
+- To update it: in the design-system repo run `npm pack`, and save the tarball in `vendor/` as
+  `whyte-design-system-<version>-<design-system commit>.tgz`, removing the old one. Then
+  `npm install ./vendor/<that file>`. The commit in the name matters: if the file name stays the
+  same while its contents change, npm and Vercel's build cache keep the old copy.
 
 ## Commands
 
