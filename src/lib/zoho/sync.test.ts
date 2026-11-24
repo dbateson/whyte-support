@@ -7,7 +7,7 @@ const { saveSettings } = await import("../settings");
 const { createTicketWithMessage, updateTicket, addStaffMessage } = await import("../tickets/service");
 const { runOutbox } = await import("./push");
 const { pullModule, cursorKey, applyNotified } = await import("./pull");
-const { enableSync, checkSetup } = await import("./sync");
+const { enableSync, checkSetup, runSync } = await import("./sync");
 const { exchangeCode } = await import("./client");
 
 const admin = { label: "Test" };
@@ -236,6 +236,16 @@ describe.skipIf(!TEST_DATABASE_URL)("Zoho sync", () => {
     await pullModule("Accounts", cursorKey("Accounts"), deadline());
     expect((await sql`select account_number from accounts`)[0]!.account_number).toBe("WD-77");
     expect(zoho.calls.find((c) => c.path === "/Accounts")).toBeTruthy();
+  });
+
+  it("runs one sync at a time, and frees the lock when done", async () => {
+    await enableSync(admin);
+    zoho.add("Accounts", { Account_Name: "Ride Shop" });
+    const [a, b] = await Promise.all([runSync(Date.now() + 20_000, null), runSync(Date.now() + 20_000, null)]);
+    expect([a.busy, b.busy].filter(Boolean)).toHaveLength(1);
+    expect((await sql`select count(*)::int as n from sync_state where key = 'zoho.run_lock'`)[0]!.n).toBe(0);
+    expect((await runSync(Date.now() + 20_000, null)).busy).toBeUndefined();
+    expect((await sql`select count(*)::int as n from accounts`)[0]!.n).toBe(1);
   });
 
   it("swaps the consent code for a refresh token", async () => {

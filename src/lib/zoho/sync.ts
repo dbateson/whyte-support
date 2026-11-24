@@ -32,6 +32,8 @@ export async function disableSync(actor: Actor) {
 /* ---------- The 15-minute run ---------- */
 
 export interface RunResult {
+  /** Another run was already going. */
+  busy?: boolean;
   sent: number;
   failed: number;
   pulled: Partial<Record<Module | "history", number>>;
@@ -42,6 +44,8 @@ export interface RunResult {
 export async function runSync(deadline: number, publicUrl: string | null): Promise<RunResult> {
   const result: RunResult = { sent: 0, failed: 0, pulled: {} };
   if (!(await syncEnabled()) || !(await zohoConnected())) return result;
+  // One run at a time (the 15-minute job, "Sync now" and the run started when sync is switched on).
+  if (!(await takeRunLock(deadline))) return { ...result, busy: true };
   try {
     Object.assign(result, await runOutbox({ deadline: Math.min(deadline, Date.now() + 60_000) }));
     for (const m of ["Accounts", "Contacts", "Cases"] as const) {
@@ -58,8 +62,21 @@ export async function runSync(deadline: number, publicUrl: string | null): Promi
     log.error("Zoho sync run failed", { err });
     await logSync({ direction: "in", entity: "reconcile", level: "error", message: `Sync run stopped: ${result.error}` });
     await writeState("zoho.last_run", { at: new Date().toISOString(), ...result });
+  } finally {
+    await db().execute(sql`delete from sync_state where key = 'zoho.run_lock'`);
   }
   return result;
+}
+
+/** Claims the run for this worker until its deadline (plus a margin, in case it dies mid-run). */
+async function takeRunLock(deadline: number): Promise<boolean> {
+  const until = new Date(deadline + 60_000).toISOString();
+  const rows = await db().execute(sql`
+    insert into sync_state (key, value) values ('zoho.run_lock', ${JSON.stringify({ until })}::jsonb)
+    on conflict (key) do update set value = excluded.value, updated_at = now()
+    where (sync_state.value->>'until')::timestamptz < now()
+    returning key`);
+  return (rows as unknown as unknown[]).length > 0;
 }
 
 export async function purgeSyncLog() {
