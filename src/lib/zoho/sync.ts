@@ -8,7 +8,7 @@ import { getSettings, saveSettings } from "../settings";
 import { zoho, zohoConnected } from "./client";
 import { ACCOUNT_FIELDS, CASE_FIELDS, CASE_READ_FIELDS, CONTACT_FIELDS, mapProblems, priorityKeys, statusKeys } from "./mapping";
 import { advanceTicketJob } from "../ingest/pipeline";
-import { cursorKey, pullModule, type Module } from "./pull";
+import { cursorKey, linkUnmatchedContacts, pullModule, type Module } from "./pull";
 import { runOutbox, syncEnabled } from "./push";
 import { clearState, logSync, readState, writeState } from "./state";
 
@@ -52,6 +52,8 @@ export async function runSync(deadline: number, publicUrl: string | null): Promi
       if (Date.now() >= deadline) break;
       result.pulled[m] = (await pullModule(m, cursorKey(m), deadline)).applied;
     }
+    // Contacts held here but not yet matched to Zoho (cases often carry only an email).
+    if (Date.now() < deadline) result.pulled.Contacts = (result.pulled.Contacts ?? 0) + (await linkUnmatchedContacts(Math.min(deadline, Date.now() + 60_000)));
     if (Date.now() < deadline) result.pulled.history = await historyStep(deadline);
     if (publicUrl) await renewNotifications(publicUrl);
     // Spare time goes on drafting knowledge-base articles from closed cases.

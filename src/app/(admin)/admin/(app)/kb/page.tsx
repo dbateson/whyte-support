@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Alert, Badge, Button, DataTable, EmptyState, PageHeader, Select, Stack, Status, TextField, type DataTableColumn } from "@whyte/design-system";
+import { Alert, Badge, Button, DataTable, EmptyState, Inline, PageHeader, Panel, Select, Stack, Status, TextField, type DataTableColumn } from "@whyte/design-system";
 import { FilterLayout, FilterToggle } from "@whyte/design-system/client";
 import { requireStaff } from "@/lib/auth/session";
-import { AUDIENCE_LABELS, visibleAudiences } from "@/lib/kb/access";
+import { AUDIENCE_LABELS, canChange, visibleAudiences } from "@/lib/kb/access";
 import { kbHref, KB_PAGE_SIZE, listArticles, parseKbFilters } from "@/lib/kb/queries";
 import { STATE_LABELS } from "@/lib/kb/labels";
 import { articleState } from "@/lib/kb/service";
-import { formatAgo } from "@/lib/tickets/format";
+import { CATEGORIES, formatAgo } from "@/lib/tickets/format";
+import { BulkEdit, RowSelect, SelectAllOnPage } from "./BulkEdit";
 
 export const metadata: Metadata = { title: "Knowledge base" };
 
@@ -23,7 +24,10 @@ export default async function KbPage({ searchParams }: { searchParams: Promise<R
   const audiences = visibleAudiences(staff);
   const { rows, total } = await listArticles(f, audiences);
   const filterCount = [f.q, f.state !== "all", f.audience].filter(Boolean).length;
+  const canBulk = staff.can("kb.edit");
+  const editAudiences = audiences.filter((a) => canChange(staff, "kb.edit", a));
   const columns: DataTableColumn<Row>[] = [
+    ...(canBulk ? [{ key: "select", header: <span className="vh">Select</span>, cell: (r: Row) => <RowSelect id={r.id} title={r.title} /> }] : []),
     { key: "title", header: "Article", cell: (r) => <Link href={`/admin/kb/articles/${r.id}`}>{r.title}</Link> },
     { key: "audience", header: "For", cell: (r) => <Badge>{AUDIENCE_LABELS[r.audience]}</Badge> },
     {
@@ -46,6 +50,11 @@ export default async function KbPage({ searchParams }: { searchParams: Promise<R
         actions={staff.can("kb.edit") ? <Button href="/admin/kb/articles/new">New article</Button> : undefined}
       />
       {sp.deleted && <Alert tone="success">Draft deleted.</Alert>}
+      {canBulk && (
+        <Panel title="Change several at once" description="Tick articles below, or apply to everything the filters show. Each article goes through its usual review steps, and anything your role can't change is skipped.">
+          <BulkEdit mode="articles" canApprove={staff.can("kb.approve")} audiences={editAudiences} categories={CATEGORIES} filters={{ q: f.q, state: f.state, audience: f.audience }} allCount={total} />
+        </Panel>
+      )}
       <FilterLayout
         count={filterCount}
         clear={filterCount ? <Link href="/admin/kb" className="btn-t">Clear filters</Link> : undefined}
@@ -82,7 +91,12 @@ export default async function KbPage({ searchParams }: { searchParams: Promise<R
           pageSize={KB_PAGE_SIZE}
           pageHref={(page) => kbHref(f, { page })}
           noun="articles"
-          actions={<FilterToggle />}
+          actions={
+            <Inline gap="small">
+              {canBulk && rows.length > 0 && <SelectAllOnPage />}
+              <FilterToggle />
+            </Inline>
+          }
           renderLink={({ children, ...p }) => <Link {...p}>{children}</Link>}
           empty={<EmptyState title={filterCount ? "No articles match" : "No articles yet"}>{filterCount ? "Try fewer filters." : "Write one, or import past emails, Zoho cases and whytebikes.com pages."}</EmptyState>}
         />

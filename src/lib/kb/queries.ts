@@ -43,8 +43,7 @@ export function kbHref(f: KbListFilters, patch: Partial<KbListFilters> = {}): st
 const working = alias(schema.kbArticleVersions, "working");
 const published = alias(schema.kbArticleVersions, "published");
 
-export async function listArticles(f: KbListFilters, audiences: KbAudience[], database: Db = db()) {
-  if (audiences.length === 0) return { rows: [], total: 0 };
+function filterFor(f: KbListFilters, audiences: KbAudience[]) {
   const where: SQL[] = [inArray(schema.kbArticles.audience, f.audience ? audiences.filter((a) => a === f.audience) : audiences)];
   const live = isNull(schema.kbArticles.retiredAt);
   if (f.state === "published") where.push(live, isNotNull(schema.kbArticles.publishedVersionId), isNull(schema.kbArticles.workingVersionId));
@@ -56,7 +55,26 @@ export async function listArticles(f: KbListFilters, audiences: KbAudience[], da
     const like = `%${f.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
     where.push(or(sql`${working.title} ilike ${like}`, sql`${published.title} ilike ${like}`, sql`${working.body} ilike ${like}`, sql`${published.body} ilike ${like}`)!);
   }
-  const filter = and(...where);
+  return and(...where);
+}
+
+/** Every article id matching the filters (for bulk edits), up to a limit. */
+export async function listArticleIds(f: KbListFilters, audiences: KbAudience[], max = 1000, database: Db = db()): Promise<string[]> {
+  if (audiences.length === 0) return [];
+  const rows = await database
+    .select({ id: schema.kbArticles.id })
+    .from(schema.kbArticles)
+    .leftJoin(working, eq(working.id, schema.kbArticles.workingVersionId))
+    .leftJoin(published, eq(published.id, schema.kbArticles.publishedVersionId))
+    .where(filterFor(f, audiences))
+    .orderBy(desc(schema.kbArticles.updatedAt))
+    .limit(max);
+  return rows.map((r) => r.id);
+}
+
+export async function listArticles(f: KbListFilters, audiences: KbAudience[], database: Db = db()) {
+  if (audiences.length === 0) return { rows: [], total: 0 };
+  const filter = filterFor(f, audiences);
   const base = () =>
     database
       .select({
@@ -172,4 +190,26 @@ export async function searchKb(query: string, segment: "b2c" | "b2b" | "any", li
         : null;
     })
     .filter((h): h is SearchHit => h !== null);
+}
+
+/** Everything waiting for a decision: submitted versions, and drafts the pipeline wrote. */
+export async function reviewQueue(audiences: KbAudience[], database: Db = db()) {
+  if (audiences.length === 0) return [];
+  const rows = await database
+    .select({
+      id: schema.kbArticles.id,
+      audience: schema.kbArticles.audience,
+      origin: schema.kbArticles.origin,
+      title: schema.kbArticleVersions.title,
+      status: schema.kbArticleVersions.status,
+      author: schema.kbArticleVersions.authorLabel,
+      at: schema.kbArticleVersions.updatedAt,
+      published: schema.kbArticles.publishedVersionId,
+    })
+    .from(schema.kbArticles)
+    .innerJoin(schema.kbArticleVersions, eq(schema.kbArticleVersions.id, schema.kbArticles.workingVersionId))
+    .where(and(inArray(schema.kbArticles.audience, audiences), isNull(schema.kbArticles.retiredAt), inArray(schema.kbArticleVersions.status, ["in_review", "draft"])))
+    .orderBy(sql`${schema.kbArticleVersions.updatedAt} asc`)
+    .limit(1000);
+  return rows.filter((r) => r.status === "in_review" || r.origin !== "manual");
 }

@@ -123,6 +123,47 @@ export async function applyContact(c: ZContact, opts: { create?: boolean } = {})
   });
 }
 
+/** The Zoho contact with this email, if there is one. */
+export async function findZohoContact(email: string): Promise<ZContact | null> {
+  const res = await zoho<{ data: ZContact[] }>("GET", "/Contacts/search", { query: { email: email.trim() } }).catch((err) => {
+    log.warn("Zoho contact search failed", { err });
+    return null;
+  });
+  return res?.data?.[0] ?? null;
+}
+
+/**
+ * Links contacts this app holds but hasn't matched to Zoho yet (by email),
+ * bringing in their Zoho details and account: a contact with an account is a
+ * dealer. Works through them in id order, a batch per run, then keeps up with
+ * new ones.
+ */
+export async function linkUnmatchedContacts(deadline: number): Promise<number> {
+  const cursor = (await readState<{ after: string }>("zoho.link_contacts")) ?? { after: "00000000-0000-0000-0000-000000000000" };
+  let linked = 0;
+  while (Date.now() < deadline) {
+    const batch = await db()
+      .select({ id: schema.contacts.id, email: schema.contacts.email })
+      .from(schema.contacts)
+      .where(sql`${schema.contacts.zohoContactId} is null and ${schema.contacts.email} is not null and ${schema.contacts.anonymisedAt} is null and ${schema.contacts.id} > ${cursor.after}`)
+      .orderBy(schema.contacts.id)
+      .limit(50);
+    if (batch.length === 0) break;
+    for (const c of batch) {
+      if (Date.now() >= deadline) break;
+      const zc = await findZohoContact(c.email!);
+      if (zc?.id) {
+        await applyContact(zc);
+        linked++;
+      }
+      cursor.after = c.id;
+    }
+    await writeState("zoho.link_contacts", cursor);
+  }
+  if (linked) await logSync({ direction: "in", entity: "contact", message: `Matched ${linked} contacts to Zoho by email.` });
+  return linked;
+}
+
 /* ---------- Cases ---------- */
 
 async function caseMaps() {
@@ -226,7 +267,10 @@ async function createTicketFromCase(c: ZCase, maps: Awaited<ReturnType<typeof ca
     const zc = res?.data?.[0];
     if (zc) contactId = await applyContact(zc, { create: true });
   } else if (c.Email) {
-    contactId = await applyContact({ Email: c.Email, Phone: c.Phone }, { create: true });
+    // Many cases carry only the customer's email, not a link to their contact: find the contact
+    // by email, so their account (a dealer, if it has one) comes with them.
+    const zc = await findZohoContact(c.Email);
+    contactId = await applyContact(zc ?? { Email: c.Email, Phone: c.Phone }, { create: true });
   }
   const [contact] = contactId ? await db().select().from(schema.contacts).where(eq(schema.contacts.id, contactId)) : [];
   const account = await localAccount(c.Account_Name?.id);

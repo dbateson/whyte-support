@@ -116,6 +116,9 @@ Check the setup, then switch sync on.
 
 - A change to a field this app owns, made in Zoho (a case closed there), is noted on the ticket and
   put back. Notes added in Zoho arrive as internal notes. Cases created in Zoho become tickets.
+- Contacts are matched to Zoho by email when a case doesn't link one (and, each sync, contacts held
+  here that aren't matched yet). A Zoho contact with an Account Name is a dealer, unless account
+  types are set on the Zoho page.
 - Contact details edited in Zoho update contacts this app already has. Zoho contacts with no tickets
   here are not copied in. Erased contacts are never refilled.
 - **Sending:** a database trigger queues each ticket change in the same transaction (`sync_outbox`),
@@ -206,5 +209,9 @@ requests without it.
 - **Resolved tickets** are queued automatically; "Draft an article from this ticket" does one now.
 - **Search** is full text, plus meaning when a Voyage AI key is set (Integrations). Knowledge base →
   Test search shows which passages the chatbot would be given for a question.
+- **Bulk edits:** on Articles and Review, tick articles (or choose everything the filters show, or
+  everything waiting) to publish, send back with a note, send for review, discard drafts, retire,
+  restore, set the category or audience, or find and replace text (as drafts, or published straight
+  away by an approver). Each article is checked against your role; anything skipped is listed.
 - Uploads over 50 MB need Supabase's project upload limit raised (Storage → Settings), or the
   export split into smaller files.

@@ -226,7 +226,7 @@ async function pushNotes(ticketId: string, caseId: string) {
 
 /** Links a contact to Zoho: the existing Zoho contact with that email, or a new one. Zoho's copy is never overwritten. */
 async function ensureZohoContact(contact: typeof schema.contacts.$inferSelect): Promise<string | null> {
-  const found = await zoho<{ data: { id: string }[] }>("GET", "/Contacts/search", { query: { email: contact.email!, fields: "id" } });
+  const found = await zoho<{ data: { id: string }[] }>("GET", "/Contacts/search", { query: { email: contact.email! } });
   let zohoId = found?.data?.[0]?.id ?? null;
   if (!zohoId) {
     const res = await zoho<{ data: WriteResult[] }>("POST", "/Contacts", {
