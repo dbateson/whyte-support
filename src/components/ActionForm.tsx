@@ -26,12 +26,15 @@ export function ActionForm({
   resetOnSuccess = false,
   gap = "small",
   label,
+  id,
 }: {
   action: FormAction;
   children: ReactNode;
   resetOnSuccess?: boolean;
   gap?: StackGap;
   label?: string;
+  /** For controls elsewhere on the page that belong to this form (their `form` attribute), such as row checkboxes. */
+  id?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
   const ref = useRef<HTMLFormElement>(null);
@@ -41,6 +44,7 @@ export function ActionForm({
   return (
     <form
       ref={ref}
+      id={id}
       aria-label={label}
       aria-busy={pending || undefined}
       onSubmit={(e) => {

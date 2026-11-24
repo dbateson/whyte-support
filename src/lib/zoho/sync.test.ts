@@ -6,7 +6,7 @@ const { setSecret } = await import("../secrets");
 const { saveSettings } = await import("../settings");
 const { createTicketWithMessage, updateTicket, addStaffMessage } = await import("../tickets/service");
 const { runOutbox } = await import("./push");
-const { pullModule, cursorKey, applyNotified } = await import("./pull");
+const { pullModule, cursorKey, applyNotified, linkUnmatchedContacts } = await import("./pull");
 const { enableSync, checkSetup, runSync } = await import("./sync");
 const { exchangeCode } = await import("./client");
 
@@ -246,6 +246,33 @@ describe.skipIf(!TEST_DATABASE_URL)("Zoho sync", () => {
     expect((await sql`select count(*)::int as n from sync_state where key = 'zoho.run_lock'`)[0]!.n).toBe(0);
     expect((await runSync(Date.now() + 20_000, null)).busy).toBeUndefined();
     expect((await sql`select count(*)::int as n from accounts`)[0]!.n).toBe(1);
+  });
+
+  it("finds the contact by email when a case has none linked, so contacts with an account become dealers", async () => {
+    await enableSync(admin);
+    const shop = zoho.add("Accounts", { Account_Name: "Trailhead Bicycle Company, Shrewsbury" });
+    zoho.add("Contacts", { First_Name: "Sandy", Last_Name: "Plenty", Email: "sandy@trailhead.example", Account_Name: { id: shop.id, name: "Trailhead Bicycle Company, Shrewsbury" } });
+    zoho.add("Cases", { Subject: "Warranty claim for a customer", Status: "Closed", Email: "sandy@trailhead.example", Description: "Frame crack on a 2023 T-140." });
+    await sql`update sync_state set value = '{"since":"2000-01-01T00:00:00Z","page":1}' where key = ${cursorKey("Cases")}`;
+    await pullModule("Cases", cursorKey("Cases"), deadline());
+    const [c] = await sql`select c.name, c.segment, c.zoho_contact_id is not null as linked, a.name as account from contacts c join accounts a on a.id = c.account_id`;
+    expect(c).toEqual({ name: "Sandy Plenty", segment: "b2b", linked: true, account: "Trailhead Bicycle Company, Shrewsbury" });
+  });
+
+  it("matches contacts already held here to Zoho by email, a batch per run", async () => {
+    await enableSync(admin);
+    const shop = zoho.add("Accounts", { Account_Name: "Ride Shop" });
+    zoho.add("Contacts", { First_Name: "Sam", Last_Name: "Lee", Email: "sam@rideshop.example", Account_Name: { id: shop.id, name: "Ride Shop" } });
+    await sql`insert into contacts (email, name) values ('sam@rideshop.example', ''), ('rider@example.com', 'A Rider')`;
+    expect(await linkUnmatchedContacts(deadline())).toBe(1);
+    expect(await sql`select email, segment, zoho_contact_id is not null as linked from contacts order by email`).toEqual([
+      { email: "rider@example.com", segment: "b2c", linked: false },
+      { email: "sam@rideshop.example", segment: "b2b", linked: true },
+    ]);
+    // Already looked at: the next run doesn't search for them again.
+    const searches = zoho.calls.filter((x) => x.path === "/Contacts/search").length;
+    await linkUnmatchedContacts(deadline());
+    expect(zoho.calls.filter((x) => x.path === "/Contacts/search").length).toBe(searches);
   });
 
   it("swaps the consent code for a refresh token", async () => {

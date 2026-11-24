@@ -5,7 +5,9 @@ import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/ActionForm";
 import { requireStaff, type Staff } from "@/lib/auth/session";
 import type { KbAudience } from "@/lib/db/schema";
-import { canChange, canSee } from "@/lib/kb/access";
+import { canChange, canSee, visibleAudiences } from "@/lib/kb/access";
+import { BULK_LIMIT, bulkApply, type BulkAction, type BulkResult } from "@/lib/kb/bulk";
+import { listArticleIds, parseKbFilters, reviewQueue } from "@/lib/kb/queries";
 import { createArticle, discardDraft, getArticle, KbError, publish, requestChanges, restore, retire, saveDraft, submitForReview } from "@/lib/kb/service";
 import { CATEGORIES } from "@/lib/tickets/format";
 
@@ -109,4 +111,69 @@ export async function articleStateAction(_: ActionState, data: FormData): Promis
     restore: "Restored. The chatbot uses its published version again.",
   };
   return { notice: done[intent] };
+}
+
+/* ---------- Bulk edits (articles list and review queue) ---------- */
+
+const REASON_ORDER = (r: BulkResult) =>
+  Object.entries(r.skipped.reduce<Record<string, number>>((acc, s) => ({ ...acc, [s.reason]: (acc[s.reason] ?? 0) + 1 }), {}))
+    .map(([reason, n]) => `${n} × ${reason}`)
+    .join(" ");
+
+export async function bulkEditAction(_: ActionState, data: FormData): Promise<ActionState> {
+  const staff = await requireStaff("kb.edit");
+  const kind = str(data, "bulkAction");
+  let action: BulkAction;
+  switch (kind) {
+    case "publish":
+    case "submit":
+    case "discard":
+    case "retire":
+    case "restore":
+      action = { kind };
+      break;
+    case "changes":
+      if (!str(data, "note")) return { error: "Add a note for the authors: what needs changing." };
+      action = { kind, note: str(data, "note").slice(0, 2000) };
+      break;
+    case "category": {
+      const c = str(data, "category");
+      action = { kind, category: (CATEGORIES as readonly string[]).includes(c) ? c : null };
+      break;
+    }
+    case "audience": {
+      const a = audienceOf(str(data, "newAudience"));
+      if (!a) return { error: "Choose who the articles are for." };
+      action = { kind, audience: a };
+      break;
+    }
+    case "replace": {
+      const find = String(data.get("find") ?? "");
+      if (!find.trim()) return { error: "Enter the text to find." };
+      if (find.length > 500) return { error: "That's too long to find." };
+      action = { kind, find, replace: String(data.get("replaceWith") ?? "").slice(0, 2000), publish: data.get("publishAfter") === "on" };
+      break;
+    }
+    default:
+      return { error: "Choose what to do." };
+  }
+
+  // Which articles: the ticked ones, or everything the page's filters (or the review queue) show.
+  const scope = str(data, "scope");
+  const audiences = visibleAudiences(staff);
+  const ids =
+    scope === "filtered"
+      ? await listArticleIds(parseKbFilters({ q: str(data, "fq") || undefined, state: str(data, "fstate") || undefined, audience: str(data, "faudience") || undefined }), audiences, BULK_LIMIT)
+      : scope === "queue"
+        ? (await reviewQueue(audiences)).map((r) => r.id).slice(0, BULK_LIMIT)
+        : data.getAll("ids").map(String);
+  if (ids.length === 0) return { error: "Tick the articles to change first." };
+
+  const r = await bulkApply(staff, ids, action);
+  revalidatePath("/admin/kb");
+  revalidatePath("/admin/kb/review");
+  const what = r.done === 1 ? "1 article" : `${r.done} articles`;
+  const note = action.kind === "audience" ? " Live articles with a draft change audience when that draft is published." : "";
+  if (r.done === 0) return { error: `Nothing changed. ${REASON_ORDER(r)}` };
+  return { notice: `Done: ${what}.${r.skipped.length ? ` Skipped ${r.skipped.length}: ${REASON_ORDER(r)}` : ""}${note}`, done: Date.now() };
 }
