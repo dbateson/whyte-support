@@ -46,6 +46,8 @@ export const SETTINGS = {
   "retention.ticket_years": "6",
   /** "true": notes on cases imported from Zoho count as Whyte's answers when drafting articles (they stay internal everywhere else). */
   "zoho.notes_for_kb": "true",
+  /** The Zoho Accounts field holding a dealer's trade account number (API name). Blank: don't match by number. */
+  "zoho.account_number_field": "Account_Number",
   /** Zoho Account types that count as dealers, comma-separated. Blank: every account is a dealer. */
   "zoho.dealer_account_types": "",
   "turnstile.site_key": "",

@@ -131,6 +131,9 @@ Check the setup, then switch sync on.
   customer could be told). Drafts wait for review under Knowledge base → Review. The 15-minute
   sync uses its spare time to work through the queue.
 - Status and priority mappings are editable on the Zoho page and checked against Zoho's picklists.
+- The Accounts field holding the trade account number is a setting (Zoho's optional `Account_Number`
+  by default; many orgs use a custom field). The setup check suggests likely fields. It's optional:
+  without it dealers are matched by email domain and Shopify sign-in.
 - Records deleted in Zoho are not deleted here; the sync log shows a warning.
 
 ## Analytics

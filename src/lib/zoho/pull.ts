@@ -8,7 +8,7 @@ import { log } from "../logger";
 import { getSettings } from "../settings";
 import { ref } from "../tickets/format";
 import { zoho } from "./client";
-import { ACCOUNT_FIELDS, CASE_FIELDS, CASE_READ_FIELDS, CONTACT_FIELDS, domainOf, hashFields, ownedCaseFields, priorityKeys, reverseMap, statusKeys } from "./mapping";
+import { accountFields, CASE_FIELDS, CASE_READ_FIELDS, CONTACT_FIELDS, domainOf, hashFields, ownedCaseFields, priorityKeys, reverseMap, statusKeys } from "./mapping";
 import { asZoho } from "./push";
 import { logSync, readState, writeState } from "./state";
 
@@ -21,13 +21,22 @@ import { logSync, readState, writeState } from "./state";
  */
 
 type Lookup = { id: string; name?: string } | null;
-interface ZAccount { id: string; Account_Name?: string; Account_Number?: string | null; Account_Type?: string | null; Website?: string | null; Phone?: string | null; Modified_Time?: string }
+interface ZAccount { id: string; Account_Name?: string; Account_Type?: string | null; [field: string]: unknown; Website?: string | null; Phone?: string | null; Modified_Time?: string }
 interface ZContact { id?: string; First_Name?: string | null; Last_Name?: string | null; Email?: string | null; Phone?: string | null; Mobile?: string | null; Account_Name?: Lookup; Modified_Time?: string }
 interface ZCase { id: string; Subject?: string; Status?: string; Priority?: string | null; Description?: string | null; Solution?: string | null; Email?: string | null; Phone?: string | null; Related_To?: Lookup; Account_Name?: Lookup; Case_Number?: string; Created_Time?: string; Modified_Time?: string }
 interface ZNote { id: string; Note_Title?: string | null; Note_Content?: string | null; Created_Time?: string; Created_By?: { name?: string } | null }
 
-export const MODULES = { Accounts: ACCOUNT_FIELDS, Contacts: CONTACT_FIELDS, Cases: CASE_READ_FIELDS } as const;
-export type Module = keyof typeof MODULES;
+export type Module = "Accounts" | "Contacts" | "Cases";
+
+async function numberField(): Promise<string> {
+  return (await getSettings(["zoho.account_number_field"]))["zoho.account_number_field"].trim();
+}
+
+/** The fields read for each module. */
+export async function fieldsFor(module: Module): Promise<string[]> {
+  if (module === "Accounts") return accountFields(await numberField());
+  return module === "Contacts" ? [...CONTACT_FIELDS] : [...CASE_READ_FIELDS];
+}
 
 /* ---------- Accounts ---------- */
 
@@ -40,15 +49,17 @@ async function dealerTypes(): Promise<string[]> {
 
 export async function applyAccount(a: ZAccount, types?: string[]): Promise<string> {
   const dealerTypesList = types ?? (await dealerTypes());
+  const field = await numberField();
+  const number = field && typeof a[field] === "string" ? (a[field] as string).trim() : "";
   const values = {
     name: a.Account_Name ?? "",
-    accountNumber: a.Account_Number?.trim() || null,
+    accountNumber: number || null,
     accountType: a.Account_Type ?? null,
-    website: a.Website ?? null,
-    emailDomain: domainOf(a.Website),
-    phone: a.Phone ?? null,
+    website: (a.Website as string | null | undefined) ?? null,
+    emailDomain: domainOf(a.Website as string | null | undefined),
+    phone: (a.Phone as string | null | undefined) ?? null,
     isDealer: dealerTypesList.length === 0 || dealerTypesList.includes((a.Account_Type ?? "").toLowerCase()),
-    zohoModifiedAt: a.Modified_Time ? new Date(a.Modified_Time) : null,
+    zohoModifiedAt: a.Modified_Time ? new Date(a.Modified_Time as string) : null,
     updatedAt: new Date(),
   };
   const [row] = await db()
@@ -64,7 +75,7 @@ async function localAccount(zohoAccountId: string | undefined): Promise<typeof s
   if (!zohoAccountId) return null;
   const [have] = await db().select().from(schema.accounts).where(eq(schema.accounts.zohoAccountId, zohoAccountId));
   if (have) return have;
-  const res = await zoho<{ data: ZAccount[] }>("GET", `/Accounts/${zohoAccountId}`, { query: { fields: ACCOUNT_FIELDS.join(",") } });
+  const res = await zoho<{ data: ZAccount[] }>("GET", `/Accounts/${zohoAccountId}`, { query: { fields: (await fieldsFor("Accounts")).join(",") } });
   const a = res?.data?.[0];
   if (!a) return null;
   await applyAccount(a);
@@ -338,7 +349,7 @@ export async function pullModule(module: Module, stateKey: string, deadline: num
   let applied = 0;
   while (Date.now() < deadline) {
     const res = await zoho<{ data: { id: string; Modified_Time?: string }[]; info?: { more_records?: boolean } }>("GET", `/${module}`, {
-      query: { fields: MODULES[module].join(","), sort_by: "Modified_Time", sort_order: "asc", per_page: 200, page: cursor.page },
+      query: { fields: (await fieldsFor(module)).join(","), sort_by: "Modified_Time", sort_order: "asc", per_page: 200, page: cursor.page },
       headers: { "If-Modified-Since": zohoTime(cursor.since) },
     });
     const records = res?.data ?? [];
@@ -385,7 +396,7 @@ export async function applyNotified(module: string, ids: string[], operation: st
   const m = module as Module;
   for (let i = 0; i < ids.length; i += 100) {
     const batch = ids.slice(i, i + 100);
-    const res = await zoho<{ data: { id: string }[] }>("GET", `/${m}`, { query: { ids: batch.join(","), fields: MODULES[m].join(",") } });
+    const res = await zoho<{ data: { id: string }[] }>("GET", `/${m}`, { query: { ids: batch.join(","), fields: (await fieldsFor(m)).join(",") } });
     for (const r of res?.data ?? []) await APPLY[m](r as never, {});
   }
 }

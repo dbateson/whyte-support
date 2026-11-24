@@ -162,11 +162,16 @@ export async function notificationChannel() {
 
 interface FieldMeta {
   api_name: string;
+  field_label?: string;
+  data_type?: string;
   pick_list_values?: { display_value?: string; actual_value?: string; type?: string }[];
 }
 
 export interface SetupReport {
+  /** Fields the sync needs: switching sync on waits until these exist. */
   missing: { module: string; field: string }[];
+  /** Accounts fields that might hold the trade account number, when the chosen one doesn't exist. */
+  accountNumberCandidates?: { apiName: string; label: string }[];
   picklists: Record<string, string[]>;
   problems: string[];
 }
@@ -178,9 +183,21 @@ export async function checkSetup(): Promise<SetupReport> {
     Accounts: ACCOUNT_FIELDS,
   };
   const report: SetupReport = { missing: [], picklists: {}, problems: [] };
+  const s = await getSettings(["zoho.status_map", "zoho.priority_map", "zoho.account_number_field"]);
+  const numberField = s["zoho.account_number_field"].trim();
   for (const [module, fields] of Object.entries(want)) {
     const res = await zoho<{ fields: FieldMeta[] }>("GET", "/settings/fields", { query: { module } });
     const have = new Map((res?.fields ?? []).map((f) => [f.api_name, f]));
+    if (module === "Accounts" && numberField && !have.has(numberField)) {
+      // Optional: without it dealers are still recognised by email domain and Shopify sign-in.
+      report.accountNumberCandidates = (res?.fields ?? [])
+        .filter((f) => (!f.data_type || ["text", "autonumber", "integer"].includes(f.data_type)) && /account|number|\bno\b|code|ref|trade|customer|dealer/i.test(`${f.api_name} ${f.field_label ?? ""}`) && f.api_name !== "Account_Name")
+        .map((f) => ({ apiName: f.api_name, label: f.field_label ?? f.api_name }))
+        .slice(0, 8);
+      report.problems.push(
+        `Zoho Accounts has no field ${numberField}, so dealers can't be matched by the account number they give (they're still matched by email domain and Shopify sign-in). Choose the field that holds the trade account number under "How values map", or leave it blank.`,
+      );
+    }
     for (const f of fields) if (!have.has(f) && f !== "Modified_Time" && f !== "Created_Time") report.missing.push({ module, field: f });
     if (module === "Cases") {
       for (const f of [CASE_FIELDS.status, CASE_FIELDS.priority, CASE_FIELDS.origin]) {
@@ -188,7 +205,6 @@ export async function checkSetup(): Promise<SetupReport> {
       }
     }
   }
-  const s = await getSettings(["zoho.status_map", "zoho.priority_map"]);
   report.problems.push(...mapProblems(s["zoho.status_map"], statusKeys, report.picklists[CASE_FIELDS.status]));
   report.problems.push(...mapProblems(s["zoho.priority_map"], priorityKeys, report.picklists[CASE_FIELDS.priority]));
   const origins = report.picklists[CASE_FIELDS.origin] ?? [];
