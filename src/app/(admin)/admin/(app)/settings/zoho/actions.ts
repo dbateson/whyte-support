@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { log } from "@/lib/logger";
 import type { ActionState } from "@/components/ActionForm";
 import { requireStaff } from "@/lib/auth/session";
 import { clearSecret } from "@/lib/secrets";
@@ -13,6 +15,12 @@ import { retryFailed, runOutbox } from "@/lib/zoho/push";
 import { checkSetup, disableNotifications, disableSync, enableNotifications, enableSync, runSync, startHistory } from "@/lib/zoho/sync";
 
 const PATH = "/admin/settings/zoho";
+
+/** Starts a sync run in the background, after the response, instead of waiting for the 15-minute job. */
+async function kickSync() {
+  const publicUrl = (await getSetting("app.public_url")) || null;
+  after(() => runSync(Date.now() + 50_000, publicUrl).catch((err) => log.error("Background Zoho sync failed", { err })));
+}
 const fail = (err: unknown): ActionState => ({ error: err instanceof ZohoError || err instanceof ZohoNotConfiguredError || err instanceof Error ? err.message : "Something went wrong." });
 
 async function admin() {
@@ -30,6 +38,7 @@ export async function setSyncAction(_: ActionState, data: FormData): Promise<Act
       await enableSync(actor);
       const publicUrl = await getSetting("app.public_url");
       if (publicUrl.startsWith("https://")) await enableNotifications(publicUrl).catch(() => undefined);
+      await kickSync();
     } else await disableSync(actor);
   } catch (err) {
     return fail(err);
@@ -73,6 +82,7 @@ export async function runNowAction(): Promise<ActionState> {
   const publicUrl = (await getSetting("app.public_url")) || null;
   const r = await runSync(Date.now() + 45_000, publicUrl);
   revalidatePath(PATH);
+  if (r.busy) return { notice: "A sync is already running. It carries on in the background: refresh in a minute to see progress." };
   if (r.error) return { error: r.error };
   const pulled = Object.values(r.pulled).reduce((a, b) => a + (b ?? 0), 0);
   return { notice: `Sent ${r.sent}${r.failed ? `, ${r.failed} failed` : ""}; checked ${pulled} records from Zoho.` };
@@ -90,9 +100,10 @@ export async function historyAction(_: ActionState, data: FormData): Promise<Act
   const actor = await admin();
   const feedKb = data.get("feedKb") === "on";
   await startHistory(actor, { feedKb });
+  await kickSync();
   revalidatePath(PATH);
   return {
-    notice: `History import started. It runs in the background, a few minutes at a time.${feedKb ? " Closed cases are queued for the knowledge base: drafts appear under Knowledge base → Review." : ""}`,
+    notice: `History import started. The first batch runs now, then more every 15 minutes (or click Sync now).${feedKb ? " Closed cases are queued for the knowledge base: drafts appear under Knowledge base → Review." : ""}`,
   };
 }
 

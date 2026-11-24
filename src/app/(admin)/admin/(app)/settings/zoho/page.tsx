@@ -16,6 +16,8 @@ import { checkSetupAction, disconnectAction, historyAction, notificationsAction,
 
 export const metadata: Metadata = { title: "Zoho CRM" };
 export const dynamic = "force-dynamic";
+// "Sync now" runs inline, and switching sync on runs one in the background after the response.
+export const maxDuration = 60;
 
 const ERRORS: Record<string, string> = {
   client: "Add the Zoho client ID and secret in Integrations first.",
@@ -217,7 +219,9 @@ export default async function ZohoPage({ searchParams }: { searchParams: Promise
             {!history
               ? "Not imported yet."
               : history.status === "running"
-                ? `Importing: ${history.applied.toLocaleString("en-GB")} cases so far (started ${formatAgo(new Date(history.startedAt))}).`
+                ? !lastRun || new Date(lastRun.at) < new Date(history.startedAt)
+                  ? `Starting: the first batch is running now (started ${formatAgo(new Date(history.startedAt))}). It carries on every 15 minutes, or click Sync now to go faster. Accounts and contacts come first, then cases.`
+                  : `Importing: ${history.applied.toLocaleString("en-GB")} cases so far (started ${formatAgo(new Date(history.startedAt))}). More every 15 minutes, or click Sync now.`
                 : `Done ${formatAgo(new Date(history.finishedAt!))}: ${history.applied.toLocaleString("en-GB")} cases checked.`}
               {history && history.feedKb !== false ? " Closed cases are drafted into articles in the background; see Knowledge base → Review." : ""}
             </p>
