@@ -41,9 +41,10 @@ export async function saveMappingAction(_: ActionState, data: FormData): Promise
   const status = String(data.get("zoho.status_map") ?? "").trim();
   const priority = String(data.get("zoho.priority_map") ?? "").trim();
   const dealer = String(data.get("zoho.dealer_account_types") ?? "").trim().slice(0, 500);
+  const notesForKb = data.get("zoho.notes_for_kb") === "on" ? "true" : "false";
   const problems = [...mapProblems(status, statusKeys), ...mapProblems(priority, priorityKeys)];
   if (problems.length) return { error: problems.join(" ") };
-  await saveSettings({ "zoho.status_map": status, "zoho.priority_map": priority, "zoho.dealer_account_types": dealer }, actor);
+  await saveSettings({ "zoho.status_map": status, "zoho.priority_map": priority, "zoho.dealer_account_types": dealer, "zoho.notes_for_kb": notesForKb }, actor);
   revalidatePath(PATH);
   return { notice: "Saved. Dealer types apply as accounts next change in Zoho, or on the next full account import." };
 }
@@ -78,11 +79,14 @@ export async function retryAction(): Promise<ActionState> {
   return { notice: `Retried ${n}: ${r.sent} sent${r.failed ? `, ${r.failed} still failing` : ""}.` };
 }
 
-export async function historyAction(): Promise<ActionState> {
+export async function historyAction(_: ActionState, data: FormData): Promise<ActionState> {
   const actor = await admin();
-  await startHistory(actor);
+  const feedKb = data.get("feedKb") === "on";
+  await startHistory(actor, { feedKb });
   revalidatePath(PATH);
-  return { notice: "History import started. It runs in the background, a few minutes at a time." };
+  return {
+    notice: `History import started. It runs in the background, a few minutes at a time.${feedKb ? " Closed cases are queued for the knowledge base: drafts appear under Knowledge base → Review." : ""}`,
+  };
 }
 
 export async function notificationsAction(_: ActionState, data: FormData): Promise<ActionState> {

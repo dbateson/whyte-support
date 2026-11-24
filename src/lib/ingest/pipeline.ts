@@ -1,9 +1,10 @@
 import "server-only";
-import { and, asc, count, desc, eq, inArray, isNotNull, like, notLike, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, like, notLike, or, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { KbAudience } from "../db/schema";
 import { createArticle } from "../kb/service";
 import { log } from "../logger";
+import { getSettings } from "../settings";
 import { IMPORT_BUCKET, objectStore } from "../storage";
 import { ref } from "../tickets/format";
 import { draftFromConversations, draftFromPage, extract, type Extraction } from "./llm";
@@ -540,6 +541,13 @@ export async function advanceAll(origin: string, budgetMs: number): Promise<numb
 
 /* ---------- Resolved tickets ---------- */
 
+/** Works through queued resolved tickets for a while (the Zoho cron uses its spare time for this). */
+export async function advanceTicketJob(budgetMs: number): Promise<void> {
+  if (budgetMs < 10_000) return;
+  const job = await ticketJob();
+  if (job.status === "extracting" || job.status === "drafting") await runStep(job.id, "", budgetMs);
+}
+
 /** The standing job that collects resolved tickets. */
 async function ticketJob(): Promise<Job> {
   const [existing] = await db().select().from(schema.ingestJobs).where(eq(schema.ingestJobs.kind, "ticket")).orderBy(asc(schema.ingestJobs.createdAt)).limit(1);
@@ -556,13 +564,24 @@ async function ticketJob(): Promise<Job> {
 export async function enqueueTicket(ticketId: string): Promise<void> {
   const [t] = await db().select().from(schema.tickets).where(eq(schema.tickets.id, ticketId));
   if (!t) return;
+  // Internal notes never feed the knowledge base, with one exception that can be switched off:
+  // notes on cases imported from Zoho, where Whyte's answers were often only ever written as notes.
+  const zohoNotes = (await getSettings(["zoho.notes_for_kb"]))["zoho.notes_for_kb"] === "true";
   const messages = await db()
     .select()
     .from(schema.ticketMessages)
-    .where(and(eq(schema.ticketMessages.ticketId, ticketId), eq(schema.ticketMessages.internal, false)))
+    .where(
+      and(
+        eq(schema.ticketMessages.ticketId, ticketId),
+        zohoNotes
+          ? or(eq(schema.ticketMessages.internal, false), and(eq(schema.ticketMessages.channel, "zoho"), eq(schema.ticketMessages.authorType, "agent")))
+          : eq(schema.ticketMessages.internal, false),
+      ),
+    )
     .orderBy(asc(schema.ticketMessages.createdAt));
   if (!messages.some((m) => m.authorType === "agent") || !messages.some((m) => m.authorType === "customer")) return;
-  const content = redact(messages.map((m) => `${m.authorType === "customer" ? "Customer" : "Whyte"}:\n${m.body}`).join("\n\n"));
+  const speaker = (m: (typeof messages)[number]) => (m.authorType === "customer" ? "Customer" : m.internal ? "Whyte (staff note)" : "Whyte");
+  const content = redact(messages.map((m) => `${speaker(m)}:\n${m.body}`).join("\n\n"));
   const job = await ticketJob();
   const [existing] = await db().select().from(schema.ingestItems).where(and(eq(schema.ingestItems.kind, "ticket"), eq(schema.ingestItems.externalId, ref(t.number))));
   if (existing?.status === "drafted") return;

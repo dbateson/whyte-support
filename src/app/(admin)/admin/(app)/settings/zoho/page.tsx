@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { desc } from "drizzle-orm";
-import { Alert, Button, CardGrid, DataTable, DescriptionList, GridItem, MetricCard, PageHeader, Panel, Stack, Status, TextArea, TextField, type DataTableColumn } from "@whyte/design-system";
+import { Alert, Button, CardGrid, Checkbox, DataTable, DescriptionList, GridItem, MetricCard, PageHeader, Panel, Stack, Status, TextArea, TextField, type DataTableColumn } from "@whyte/design-system";
 import { ActionForm } from "@/components/ActionForm";
 import { requireStaff } from "@/lib/auth/session";
 import { db, schema } from "@/lib/db";
@@ -34,7 +34,7 @@ export default async function ZohoPage({ searchParams }: { searchParams: Promise
   const [connected, hasClient, s, counts, failed, channel, history, lastRun, report, recent] = await Promise.all([
     zohoConnected(),
     getSecret("zoho.client_id").then(Boolean),
-    getSettings(["zoho.sync_enabled", "zoho.status_map", "zoho.priority_map", "zoho.dealer_account_types", "app.public_url", "zoho.accounts_domain"]),
+    getSettings(["zoho.sync_enabled", "zoho.status_map", "zoho.priority_map", "zoho.dealer_account_types", "zoho.notes_for_kb", "app.public_url", "zoho.accounts_domain"]),
     outboxCounts(),
     failedChanges(),
     notificationChannel(),
@@ -182,6 +182,12 @@ export default async function ZohoPage({ searchParams }: { searchParams: Promise
             defaultValue={s["zoho.dealer_account_types"]}
             help="Zoho Account Type values, comma-separated (for example Reseller, Distributor). Leave blank if every account in Zoho is a dealer."
           />
+          <Checkbox
+            name="zoho.notes_for_kb"
+            label="Use Zoho case notes as Whyte's answers when drafting articles"
+            description="Often the only record of what Whyte told the customer. Notes stay internal everywhere else; drafts mark them as staff notes and always wait for review. A case's Solution field is always used."
+            defaultChecked={s["zoho.notes_for_kb"] === "true"}
+          />
           <div className="ds-inline">
             <Button type="submit" size="small">Save</Button>
           </div>
@@ -191,22 +197,26 @@ export default async function ZohoPage({ searchParams }: { searchParams: Promise
       {on && (
         <Panel
           title="History"
-          description="Brings every past Zoho case in as a ticket, with its notes, for search and analytics. Runs in the background; existing tickets aren't duplicated."
-          actions={
-            history?.status !== "running" ? (
-              <ActionForm action={historyAction}>
-                <Button type="submit" size="small" variant="secondary">{history ? "Import again" : "Import past cases"}</Button>
-              </ActionForm>
-            ) : undefined
-          }
+          description="Brings every past Zoho case in as a ticket, with its notes and solution, for search, analytics and the knowledge base. Runs in the background; existing tickets aren't duplicated."
         >
-          <p>
+          <Stack gap="small">
+            <p>
             {!history
               ? "Not imported yet."
               : history.status === "running"
                 ? `Importing: ${history.applied.toLocaleString("en-GB")} cases so far (started ${formatAgo(new Date(history.startedAt))}).`
                 : `Done ${formatAgo(new Date(history.finishedAt!))}: ${history.applied.toLocaleString("en-GB")} cases checked.`}
-          </p>
+              {history && history.feedKb !== false ? " Closed cases are drafted into articles in the background; see Knowledge base → Review." : ""}
+            </p>
+            {history?.status !== "running" && (
+              <ActionForm action={historyAction} label="Import past cases">
+                <Checkbox name="feedKb" label="Draft knowledge-base articles from closed cases" description="Uses Claude on each closed case's question and answer. Drafts wait for review before the chatbot uses them." defaultChecked />
+                <div className="ds-inline">
+                  <Button type="submit" size="small" variant="secondary">{history ? "Import again" : "Import past cases"}</Button>
+                </div>
+              </ActionForm>
+            )}
+          </Stack>
         </Panel>
       )}
 

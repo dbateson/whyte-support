@@ -163,6 +163,47 @@ describe.skipIf(!TEST_DATABASE_URL)("Zoho sync", () => {
     expect(await outbox()).toEqual([]);
   });
 
+  it("feeds closed Zoho cases to the knowledge base: the Solution as Whyte's answer, notes as staff notes", async () => {
+    await enableSync(admin);
+    const kase = zoho.add("Cases", { Subject: "Creak from the bottom bracket", Status: "Closed", Description: "My 905 creaks when pedalling hard.", Solution: "Clean and re-grease the bottom bracket threads, then torque to spec." });
+    zoho.addNote(kase.id, "Sent a BB tool. Customer confirmed the creak has gone.");
+    const open = zoho.add("Cases", { Subject: "Where is my order", Status: "New", Description: "Ordered last week." });
+    await sql`update sync_state set value = '{"since":"2000-01-01T00:00:00Z","page":1}' where key = ${cursorKey("Cases")}`;
+    await pullModule("Cases", cursorKey("Cases"), deadline());
+
+    const msgs = await sql`select author_type, internal, author_name, body from ticket_messages m join tickets t on t.id = m.ticket_id where t.zoho_case_id = ${kase.id} order by m.created_at`;
+    expect(msgs.map((m) => [m.author_type, m.internal, m.author_name])).toEqual([
+      ["customer", false, "Customer"],
+      ["agent", false, "Whyte (solution in Zoho)"],
+      ["agent", true, "Sam in Zoho (Zoho)"],
+    ]);
+    // Only the closed case is queued, with the solution and the note marked as a staff note.
+    const items = await sql`select title, content, status from ingest_items where kind = 'ticket'`;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ title: "Creak from the bottom bracket", status: "pending" });
+    expect(items[0]!.content).toContain("Whyte:\nClean and re-grease");
+    expect(items[0]!.content).toContain("Whyte (staff note):\nSent a BB tool.");
+    expect(open.id).toBeTruthy();
+
+    // A later change to the solution updates the ticket and queues it again; nothing goes back to Zoho.
+    zoho.edit("Cases", kase.id, { Solution: "Clean, re-grease and torque the bottom bracket to 40 Nm." });
+    await applyNotified("Cases", [kase.id], "update");
+    expect((await sql`select body from ticket_messages where zoho_note_id = ${"solution:" + kase.id}`)[0]!.body).toContain("40 Nm");
+    expect((await sql`select content from ingest_items where kind = 'ticket'`)[0]!.content).toContain("40 Nm");
+    expect(await outbox()).toEqual([]);
+  });
+
+  it("leaves Zoho notes out of drafts when that's switched off", async () => {
+    await enableSync(admin);
+    await saveSettings({ "zoho.notes_for_kb": "false" }, admin);
+    const kase = zoho.add("Cases", { Subject: "Bent hanger", Status: "Closed", Description: "Gear hanger bent in a crash." });
+    zoho.addNote(kase.id, "Sent a replacement hanger.");
+    await sql`update sync_state set value = '{"since":"2000-01-01T00:00:00Z","page":1}' where key = ${cursorKey("Cases")}`;
+    await pullModule("Cases", cursorKey("Cases"), deadline());
+    // No Whyte answer without the notes, so nothing to draft from.
+    expect((await sql`select count(*)::int as n from ingest_items`)[0]!.n).toBe(0);
+  });
+
   it("applies Zoho's contact details to contacts it already has, and leaves others out", async () => {
     await enableSync(admin);
     await newTicket();

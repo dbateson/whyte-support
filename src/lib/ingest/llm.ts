@@ -44,7 +44,9 @@ Decide whether the conversation holds reusable support knowledge: a policy (warr
 - topic: a short lowercase kebab-case key for the subject, such as "frame-warranty-claim" or "bottom-bracket-creak". If one of the existing topics is the same subject, use it exactly.
 - audience: "b2b" when the customer is a dealer, shop or trade account; "b2c" for riders; "unknown" when unclear.
 - product: the bike model or part concerned, if named; otherwise null.
-- confidence: how sure you are that the answer is correct and reusable.`;
+- confidence: how sure you are that the answer is correct and reusable.
+
+Lines from "Whyte (staff note)" are Whyte's internal case notes, not messages the customer saw. Use them only for what Whyte decided or did that any customer could be told (for example "frames with this crack are replaced under warranty"). Leave out internal opinions, costs, stock, supplier details and anything about this particular customer.`;
 
 const DRAFT_QA_SYSTEM = `You write knowledge-base articles for Whyte Bikes customer support, a UK mountain bike and e-bike brand. A support chatbot will answer customers from these articles, quoting them, and staff review every draft before it's used.
 
