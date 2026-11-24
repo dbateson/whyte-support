@@ -7,7 +7,7 @@ const { saveSettings } = await import("../settings");
 const { createTicketWithMessage, updateTicket, addStaffMessage } = await import("../tickets/service");
 const { runOutbox } = await import("./push");
 const { pullModule, cursorKey, applyNotified } = await import("./pull");
-const { enableSync } = await import("./sync");
+const { enableSync, checkSetup } = await import("./sync");
 const { exchangeCode } = await import("./client");
 
 const admin = { label: "Test" };
@@ -214,6 +214,28 @@ describe.skipIf(!TEST_DATABASE_URL)("Zoho sync", () => {
     await sql`update sync_state set value = '{"since":"2000-01-01T00:00:00Z","page":1}' where key = ${cursorKey("Contacts")}`;
     await pullModule("Contacts", cursorKey("Contacts"), deadline());
     expect(await sql`select name, phone, email from contacts`).toEqual([{ name: "Janet Doe", phone: "01234 000000", email: "jane@example.com" }]);
+  });
+
+  it("treats the account number field as optional, suggests likely fields, and reads the one chosen", async () => {
+    const f = (api_name: string, field_label = api_name, data_type = "text") => ({ api_name, field_label, data_type });
+    const pick = (api_name: string, values: string[]) => ({ api_name, data_type: "picklist", pick_list_values: values.map((actual_value) => ({ actual_value })) });
+    zoho.fieldMeta = {
+      Cases: [f("Subject"), pick("Status", ["New", "On Hold", "Escalated", "Closed"]), pick("Priority", ["-None-", "High", "Medium", "Low"]), pick("Case_Origin", ["Email", "Phone", "Web"]), f("Description", "Description", "textarea"), f("Solution", "Solution", "textarea"), f("Email", "Email", "email"), f("Phone", "Phone", "phone"), f("Related_To", "Contact Name", "lookup"), f("Account_Name", "Account Name", "lookup"), f("Case_Number", "Case Number", "autonumber")],
+      Contacts: [f("First_Name"), f("Last_Name"), f("Email"), f("Phone"), f("Mobile"), f("Account_Name", "Account Name", "lookup")],
+      Accounts: [f("Account_Name"), f("Account_Type", "Account Type", "picklist"), f("Website", "Website", "website"), f("Phone"), f("Trade_Account_No", "Trade Account No"), f("Rating")],
+    };
+    const report = await checkSetup();
+    expect(report.missing).toEqual([]);
+    expect(report.problems).toEqual([expect.stringContaining("Zoho Accounts has no field Account_Number")]);
+    expect(report.accountNumberCandidates).toEqual([{ apiName: "Trade_Account_No", label: "Trade Account No" }]);
+
+    await saveSettings({ "zoho.account_number_field": "Trade_Account_No" }, admin);
+    expect((await checkSetup()).problems).toEqual([]);
+    await enableSync(admin);
+    zoho.add("Accounts", { Account_Name: "Ride Shop", Trade_Account_No: "WD-77" });
+    await pullModule("Accounts", cursorKey("Accounts"), deadline());
+    expect((await sql`select account_number from accounts`)[0]!.account_number).toBe("WD-77");
+    expect(zoho.calls.find((c) => c.path === "/Accounts")).toBeTruthy();
   });
 
   it("swaps the consent code for a refresh token", async () => {

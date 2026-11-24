@@ -34,7 +34,7 @@ export default async function ZohoPage({ searchParams }: { searchParams: Promise
   const [connected, hasClient, s, counts, failed, channel, history, lastRun, report, recent] = await Promise.all([
     zohoConnected(),
     getSecret("zoho.client_id").then(Boolean),
-    getSettings(["zoho.sync_enabled", "zoho.status_map", "zoho.priority_map", "zoho.dealer_account_types", "zoho.notes_for_kb", "app.public_url", "zoho.accounts_domain"]),
+    getSettings(["zoho.sync_enabled", "zoho.status_map", "zoho.priority_map", "zoho.dealer_account_types", "zoho.notes_for_kb", "zoho.account_number_field", "app.public_url", "zoho.accounts_domain"]),
     outboxCounts(),
     failedChanges(),
     notificationChannel(),
@@ -159,11 +159,18 @@ export default async function ZohoPage({ searchParams }: { searchParams: Promise
             <p>Not checked yet.</p>
           ) : (
             <Stack gap="small">
-              {report.missing.length === 0 && report.problems.length === 0 ? (
+              {report.missing.length === 0 && report.problems.length === 0 && (
                 <Alert tone="success">Everything this app uses exists in Zoho (checked {formatAgo(new Date(report.at))}).</Alert>
-              ) : (
+              )}
+              {report.missing.length > 0 && (
+                <Alert tone="error" title="Sync can't start yet">
+                  {report.missing.map((m) => `Zoho ${m.module} has no field ${m.field}.`).join(" ")}
+                </Alert>
+              )}
+              {report.problems.length > 0 && (
                 <Alert tone="warning" title="Needs attention">
-                  {[...report.missing.map((m) => `Zoho ${m.module} has no field ${m.field}.`), ...report.problems].join(" ")}
+                  {report.problems.join(" ")}
+                  {report.accountNumberCandidates?.length ? ` Fields that might hold it: ${report.accountNumberCandidates.map((c) => `${c.label} (${c.apiName})`).join(", ")}.` : ""}
                 </Alert>
               )}
               <DescriptionList items={Object.entries(report.picklists).map(([k, v]) => ({ term: `Zoho ${k} values`, detail: v.join(", ") || "None found" }))} />
@@ -181,6 +188,12 @@ export default async function ZohoPage({ searchParams }: { searchParams: Promise
             name="zoho.dealer_account_types"
             defaultValue={s["zoho.dealer_account_types"]}
             help="Zoho Account Type values, comma-separated (for example Reseller, Distributor). Leave blank if every account in Zoho is a dealer."
+          />
+          <TextField
+            label="Accounts field with the trade account number"
+            name="zoho.account_number_field"
+            defaultValue={s["zoho.account_number_field"]}
+            help="Its API name in Zoho (Setup → Developer Space → APIs → API names → Accounts), such as Account_Number or a custom field like Trade_Account_No. Dealers who give this number are recognised. Leave blank to match by email domain and Shopify sign-in only."
           />
           <Checkbox
             name="zoho.notes_for_kb"

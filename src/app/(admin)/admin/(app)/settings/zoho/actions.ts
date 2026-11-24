@@ -6,7 +6,9 @@ import { requireStaff } from "@/lib/auth/session";
 import { clearSecret } from "@/lib/secrets";
 import { getSetting, saveSettings } from "@/lib/settings";
 import { forgetAccessToken, ZohoError, ZohoNotConfiguredError, zohoConnected } from "@/lib/zoho/client";
-import { mapProblems, priorityKeys, statusKeys } from "@/lib/zoho/mapping";
+import { cursorKey } from "@/lib/zoho/pull";
+import { writeState } from "@/lib/zoho/state";
+import { FIELD_API_NAME, mapProblems, priorityKeys, statusKeys } from "@/lib/zoho/mapping";
 import { retryFailed, runOutbox } from "@/lib/zoho/push";
 import { checkSetup, disableNotifications, disableSync, enableNotifications, enableSync, runSync, startHistory } from "@/lib/zoho/sync";
 
@@ -42,11 +44,16 @@ export async function saveMappingAction(_: ActionState, data: FormData): Promise
   const priority = String(data.get("zoho.priority_map") ?? "").trim();
   const dealer = String(data.get("zoho.dealer_account_types") ?? "").trim().slice(0, 500);
   const notesForKb = data.get("zoho.notes_for_kb") === "on" ? "true" : "false";
+  const numberField = String(data.get("zoho.account_number_field") ?? "").trim();
+  if (numberField && !FIELD_API_NAME.test(numberField)) return { error: "The account number field should be a Zoho API name, like Account_Number (letters, numbers and underscores)." };
   const problems = [...mapProblems(status, statusKeys), ...mapProblems(priority, priorityKeys)];
   if (problems.length) return { error: problems.join(" ") };
-  await saveSettings({ "zoho.status_map": status, "zoho.priority_map": priority, "zoho.dealer_account_types": dealer, "zoho.notes_for_kb": notesForKb }, actor);
+  const fieldChanged = numberField !== (await getSetting("zoho.account_number_field")).trim();
+  await saveSettings({ "zoho.status_map": status, "zoho.priority_map": priority, "zoho.dealer_account_types": dealer, "zoho.notes_for_kb": notesForKb, "zoho.account_number_field": numberField }, actor);
+  // A different field means every account needs reading again: the next sync re-imports them.
+  if (fieldChanged) await writeState(cursorKey("Accounts"), { since: "2000-01-01T00:00:00Z", page: 1 });
   revalidatePath(PATH);
-  return { notice: "Saved. Dealer types apply as accounts next change in Zoho, or on the next full account import." };
+  return { notice: "Saved. Dealer types and the account number field apply as accounts next change in Zoho; run Check now to confirm the field exists." };
 }
 
 export async function checkSetupAction(): Promise<ActionState> {

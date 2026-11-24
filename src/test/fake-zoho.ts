@@ -9,6 +9,8 @@ export class FakeZoho {
   notes = new Map<string, { id: string; caseId: string; Note_Title?: string; Note_Content: string; Created_Time: string; Created_By: { name: string } }>();
   calls: { method: string; path: string; body?: unknown }[] = [];
   tokensIssued = 0;
+  /** What /settings/fields returns, per module. */
+  fieldMeta: Record<string, { api_name: string; field_label?: string; data_type?: string; pick_list_values?: { actual_value: string }[] }[]> = {};
   /** Make the next n API calls fail with this. */
   failNext: { status: number; code: string; times: number } | null = null;
   private seq = 1000;
@@ -124,7 +126,7 @@ export class FakeZoho {
     }
     if (path === "/Tasks" && method === "POST") return this.json({ data: [{ code: "SUCCESS", status: "success", message: "record added", details: { id: this.nextId() } }] }, 201);
     if (path === "/actions/watch") return this.json({ watch: [{ code: "SUCCESS", status: "success" }] });
-    if (path === "/settings/fields") return this.json({ fields: [] });
+    if (path === "/settings/fields") return this.json({ fields: this.fieldMeta[url.searchParams.get("module") ?? ""] ?? [] });
     return this.json({ code: "NOT_FOUND", status: "error" }, 404);
   }
 }
