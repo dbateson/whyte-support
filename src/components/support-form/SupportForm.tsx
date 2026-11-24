@@ -219,7 +219,7 @@ export function SupportForm({ apiBase = "", shopifyToken, prefill, turnstileCont
 
         <Stack gap="small">
           <h2 className="ds-heading-small">How can we help?</h2>
-          <TextField label="Summary" name="summary" required maxLength={200} placeholder={category === "Warranty" ? "e.g. Crack near the rear dropout" : undefined} error={fields.summary} />
+          <TextField label="Summary" name="summary" required maxLength={200} placeholder="I'm looking for new bearings" error={fields.summary} />
           <TextArea label="Details" name="details" rows={7} required minLength={10} help="What happened, when, and anything you've tried." error={fields.details} />
           <FileField
             label="Photos or documents (optional)"
