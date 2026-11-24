@@ -22,7 +22,7 @@ export const CASE_FIELDS = {
 
 export const CONTACT_FIELDS = ["First_Name", "Last_Name", "Email", "Phone", "Mobile", "Account_Name", "Modified_Time"] as const;
 export const ACCOUNT_FIELDS = ["Account_Name", "Account_Number", "Account_Type", "Website", "Phone", "Modified_Time"] as const;
-export const CASE_READ_FIELDS = ["Subject", "Status", "Priority", "Case_Origin", "Description", "Email", "Phone", "Related_To", "Account_Name", "Case_Number", "Created_Time", "Modified_Time"] as const;
+export const CASE_READ_FIELDS = ["Subject", "Status", "Priority", "Case_Origin", "Description", "Solution", "Email", "Phone", "Related_To", "Account_Name", "Case_Number", "Created_Time", "Modified_Time"] as const;
 
 /** "new=New\nopen=New" → { new: "New", open: "New" }. Lines that don't parse are ignored. */
 export function parseMap(text: string): Record<string, string> {

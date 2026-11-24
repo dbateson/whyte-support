@@ -7,6 +7,7 @@ import { getSecret, setSecret, type Actor } from "../secrets";
 import { getSettings, saveSettings } from "../settings";
 import { zoho, zohoConnected } from "./client";
 import { ACCOUNT_FIELDS, CASE_FIELDS, CASE_READ_FIELDS, CONTACT_FIELDS, mapProblems, priorityKeys, statusKeys } from "./mapping";
+import { advanceTicketJob } from "../ingest/pipeline";
 import { cursorKey, pullModule, type Module } from "./pull";
 import { runOutbox, syncEnabled } from "./push";
 import { clearState, logSync, readState, writeState } from "./state";
@@ -49,6 +50,8 @@ export async function runSync(deadline: number, publicUrl: string | null): Promi
     }
     if (Date.now() < deadline) result.pulled.history = await historyStep(deadline);
     if (publicUrl) await renewNotifications(publicUrl);
+    // Spare time goes on drafting knowledge-base articles from closed cases.
+    await advanceTicketJob(Math.min(deadline - Date.now() - 10_000, 120_000));
     await writeState("zoho.last_run", { at: new Date().toISOString(), ...result });
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err);
@@ -67,15 +70,17 @@ export async function purgeSyncLog() {
 
 interface History {
   status: "running" | "done";
+  /** Closed cases also go to the knowledge base, to be drafted into articles for review. */
+  feedKb?: boolean;
   startedAt: string;
   finishedAt?: string;
   applied: number;
 }
 const HISTORY_CURSOR = "zoho.history.cursor";
 
-export async function startHistory(actor: Actor) {
+export async function startHistory(actor: Actor, opts: { feedKb: boolean } = { feedKb: true }) {
   await writeState(HISTORY_CURSOR, { since: "2000-01-01T00:00:00Z", page: 1 });
-  await writeState("zoho.history", { status: "running", startedAt: new Date().toISOString(), applied: 0 } satisfies History);
+  await writeState("zoho.history", { status: "running", startedAt: new Date().toISOString(), applied: 0, feedKb: opts.feedKb } satisfies History);
   await logSync({ direction: "in", entity: "history", message: `History import started by ${actor.label}.` });
 }
 
@@ -86,7 +91,7 @@ export async function historyStatus(): Promise<History | null> {
 async function historyStep(deadline: number): Promise<number> {
   const h = await historyStatus();
   if (h?.status !== "running") return 0;
-  const r = await pullModule("Cases", HISTORY_CURSOR, deadline, { history: true });
+  const r = await pullModule("Cases", HISTORY_CURSOR, deadline, { history: true, feedKb: h.feedKb !== false });
   const next: History = { ...h, applied: h.applied + r.applied, ...(r.done ? { status: "done", finishedAt: new Date().toISOString() } : {}) };
   await writeState("zoho.history", next);
   if (r.done) {

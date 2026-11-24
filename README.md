@@ -123,8 +123,13 @@ Check the setup, then switch sync on.
   listed on the Zoho page.
 - **Receiving:** Zoho notifications (renewed automatically, up to a week at a time) plus a check
   every 15 minutes (`/api/cron/zoho`) for anything modified since the last run.
-- **History:** "Import past cases" brings every past case and its notes in as tickets, in the
-  background.
+- **History:** "Import past cases" brings every past case in as a ticket, in the background: its
+  description, its **Solution** (as Whyte's answer) and its notes (as internal notes).
+- **Knowledge base:** closed cases (from the history import, and new ones) are queued for drafting,
+  like tickets resolved here. Whyte's answer comes from the case's Solution and, unless switched
+  off on the Zoho page, its notes, which the drafting step treats as staff notes (only what any
+  customer could be told). Drafts wait for review under Knowledge base → Review. The 15-minute
+  sync uses its spare time to work through the queue.
 - Status and priority mappings are editable on the Zoho page and checked against Zoho's picklists.
 - Records deleted in Zoho are not deleted here; the sync log shows a warning.
 
@@ -164,7 +169,7 @@ tickets imported from Zoho:
 ## Security notes
 
 - Secrets live only in the encrypted store (Settings → Integrations); the environment holds only
-  `DATABASE_URL`, `APP_ENCRYPTION_KEY` (+ `_VERSION`, `_PREVIOUS` while rotating) and `CRON_SECRET`.
+  `DATABASE_URL` (or `POSTGRES_URL`, as Vercel's Supabase integration sets it), `APP_ENCRYPTION_KEY` (+ `_VERSION`, `_PREVIOUS` while rotating) and `CRON_SECRET`.
   Never set `WHYTE_LOCAL_STORAGE` in production (it enables a development-only file store).
 - Set **Settings → General → Support site address** before go-live: links in emails use it.
 - Dealer-only articles reach only dealers Shopify confirms (signed in, tagged as trade). An

@@ -3,6 +3,8 @@ import { randomBytes } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { TicketPriority, TicketStatus } from "../db/schema";
+import { enqueueTicket } from "../ingest/pipeline";
+import { log } from "../logger";
 import { getSettings } from "../settings";
 import { ref } from "../tickets/format";
 import { zoho } from "./client";
@@ -21,7 +23,7 @@ import { logSync, readState, writeState } from "./state";
 type Lookup = { id: string; name?: string } | null;
 interface ZAccount { id: string; Account_Name?: string; Account_Number?: string | null; Account_Type?: string | null; Website?: string | null; Phone?: string | null; Modified_Time?: string }
 interface ZContact { id?: string; First_Name?: string | null; Last_Name?: string | null; Email?: string | null; Phone?: string | null; Mobile?: string | null; Account_Name?: Lookup; Modified_Time?: string }
-interface ZCase { id: string; Subject?: string; Status?: string; Priority?: string | null; Description?: string | null; Email?: string | null; Phone?: string | null; Related_To?: Lookup; Account_Name?: Lookup; Case_Number?: string; Created_Time?: string; Modified_Time?: string }
+interface ZCase { id: string; Subject?: string; Status?: string; Priority?: string | null; Description?: string | null; Solution?: string | null; Email?: string | null; Phone?: string | null; Related_To?: Lookup; Account_Name?: Lookup; Case_Number?: string; Created_Time?: string; Modified_Time?: string }
 interface ZNote { id: string; Note_Title?: string | null; Note_Content?: string | null; Created_Time?: string; Created_By?: { name?: string } | null }
 
 export const MODULES = { Accounts: ACCOUNT_FIELDS, Contacts: CONTACT_FIELDS, Cases: CASE_READ_FIELDS } as const;
@@ -118,11 +120,18 @@ async function caseMaps() {
 }
 
 /** Applies one Zoho case. Returns what happened, for the log. */
-export async function applyCase(c: ZCase, opts: { withNotes?: boolean; history?: boolean } = {}): Promise<"created" | "unchanged" | "conflict" | "linked"> {
+export interface CaseOptions {
+  withNotes?: boolean;
+  history?: boolean;
+  /** Queue closed cases for knowledge-base drafting (on unless the history import was started without it). */
+  feedKb?: boolean;
+}
+
+export async function applyCase(c: ZCase, opts: CaseOptions = {}): Promise<"created" | "unchanged" | "conflict" | "linked"> {
   const maps = await caseMaps();
   const [ticket] = await db().select().from(schema.tickets).where(eq(schema.tickets.zohoCaseId, c.id));
   if (!ticket) {
-    await createTicketFromCase(c, maps, opts.history ?? false);
+    await createTicketFromCase(c, maps, opts);
     return "created";
   }
 
@@ -160,11 +169,46 @@ export async function applyCase(c: ZCase, opts: { withNotes?: boolean; history?:
     }
   }
   if (c.Case_Number && c.Case_Number !== ticket.zohoCaseNumber) await asZoho((tx) => tx.update(schema.tickets).set({ zohoCaseNumber: c.Case_Number }).where(eq(schema.tickets.id, ticket.id)));
-  if (opts.withNotes) await pullNotes(c.id, ticket.id);
+  const solutionChanged = await syncSolution(ticket.id, c);
+  const notesAdded = opts.withNotes ? await pullNotes(c.id, ticket.id) : 0;
+  // A Zoho case that's closed here, whose answer just arrived or changed, goes to the knowledge base.
+  if ((solutionChanged || notesAdded) && ticket.source === "zoho" && (ticket.status === "resolved" || ticket.status === "closed") && opts.feedKb !== false) await feedKb(ticket.id);
   return result;
 }
 
-async function createTicketFromCase(c: ZCase, maps: Awaited<ReturnType<typeof caseMaps>>, history: boolean) {
+/**
+ * Zoho's Solution field is the answer Whyte gave on the case: kept as a
+ * Whyte reply on the ticket (one per case, updated when it changes), so it
+ * reads in the thread and feeds the knowledge base. Returns whether it changed.
+ */
+async function syncSolution(ticketId: string, c: ZCase): Promise<boolean> {
+  const text = c.Solution?.trim();
+  if (!text) return false;
+  const key = `solution:${c.id}`;
+  const [have] = await db().select({ id: schema.ticketMessages.id, body: schema.ticketMessages.body }).from(schema.ticketMessages).where(eq(schema.ticketMessages.zohoNoteId, key));
+  if (have?.body === text) return false;
+  await asZoho(async (tx) => {
+    if (have) await tx.update(schema.ticketMessages).set({ body: text }).where(eq(schema.ticketMessages.id, have.id));
+    else
+      await tx.insert(schema.ticketMessages).values({
+        ticketId,
+        authorType: "agent",
+        authorName: "Whyte (solution in Zoho)",
+        body: text,
+        channel: "zoho",
+        zohoNoteId: key,
+        createdAt: c.Modified_Time ? new Date(c.Modified_Time) : new Date(),
+      });
+  });
+  return true;
+}
+
+async function feedKb(ticketId: string) {
+  await enqueueTicket(ticketId).catch((err) => log.warn("Couldn't queue a Zoho case for the knowledge base", { err }));
+}
+
+async function createTicketFromCase(c: ZCase, maps: Awaited<ReturnType<typeof caseMaps>>, opts: CaseOptions) {
+  const history = opts.history ?? false;
   let contactId: string | null = null;
   if (c.Related_To?.id) {
     const res = await zoho<{ data: ZContact[] }>("GET", `/Contacts/${c.Related_To.id}`, { query: { fields: CONTACT_FIELDS.join(",") } }).catch(() => null);
@@ -224,7 +268,9 @@ async function createTicketFromCase(c: ZCase, maps: Awaited<ReturnType<typeof ca
     return t.id;
   });
   if (!ticketId) return;
+  await syncSolution(ticketId, c);
   await pullNotes(c.id, ticketId);
+  if (done && opts.feedKb !== false) await feedKb(ticketId);
   if (!history) await logSync({ direction: "in", entity: "ticket", entityId: ticketId, zohoId: c.id, message: `New case ${c.Case_Number ?? c.id} from Zoho became a ticket.` });
 }
 
@@ -276,10 +322,10 @@ interface Cursor {
   page: number;
 }
 
-const APPLY: Record<Module, (r: never, history: boolean) => Promise<unknown>> = {
+const APPLY: Record<Module, (r: never, opts: CaseOptions) => Promise<unknown>> = {
   Accounts: (r: ZAccount) => applyAccount(r),
   Contacts: (r: ZContact) => applyContact(r),
-  Cases: (r: ZCase, history: boolean) => applyCase(r, { withNotes: true, history }),
+  Cases: (r: ZCase, opts: CaseOptions) => applyCase(r, { withNotes: true, ...opts }),
 };
 
 /**
@@ -287,7 +333,7 @@ const APPLY: Record<Module, (r: never, history: boolean) => Promise<unknown>> = 
  * moving the cursor as it goes so a run can stop at its deadline and the next
  * carries on. Returns how many records were applied and whether it's caught up.
  */
-export async function pullModule(module: Module, stateKey: string, deadline: number, opts: { history?: boolean } = {}): Promise<{ applied: number; done: boolean }> {
+export async function pullModule(module: Module, stateKey: string, deadline: number, opts: Omit<CaseOptions, "withNotes"> = {}): Promise<{ applied: number; done: boolean }> {
   const cursor = (await readState<Cursor>(stateKey)) ?? { since: new Date().toISOString(), page: 1 };
   let applied = 0;
   while (Date.now() < deadline) {
@@ -301,7 +347,7 @@ export async function pullModule(module: Module, stateKey: string, deadline: num
         await writeState(stateKey, cursor);
         return { applied, done: false };
       }
-      await APPLY[module](r as never, opts.history ?? false);
+      await APPLY[module](r as never, opts);
       applied++;
     }
     const last = records.at(-1)?.Modified_Time;
@@ -340,6 +386,6 @@ export async function applyNotified(module: string, ids: string[], operation: st
   for (let i = 0; i < ids.length; i += 100) {
     const batch = ids.slice(i, i + 100);
     const res = await zoho<{ data: { id: string }[] }>("GET", `/${m}`, { query: { ids: batch.join(","), fields: MODULES[m].join(",") } });
-    for (const r of res?.data ?? []) await APPLY[m](r as never, false);
+    for (const r of res?.data ?? []) await APPLY[m](r as never, {});
   }
 }

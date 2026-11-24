@@ -44,6 +44,8 @@ export const SETTINGS = {
   "zoho.priority_map": "low=Low\nnormal=Medium\nhigh=High\nurgent=High",
   /** Years a closed ticket's content is kept before it's erased (statistics stay). UK practice for warranty records: 6. */
   "retention.ticket_years": "6",
+  /** "true": notes on cases imported from Zoho count as Whyte's answers when drafting articles (they stay internal everywhere else). */
+  "zoho.notes_for_kb": "true",
   /** Zoho Account types that count as dealers, comma-separated. Blank: every account is a dealer. */
   "zoho.dealer_account_types": "",
   "turnstile.site_key": "",
