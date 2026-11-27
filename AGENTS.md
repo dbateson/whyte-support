@@ -62,7 +62,7 @@ Claude for the chatbot (`claude-haiku-5-5` by default, a setting, not code).
 
 - All UI uses `@whyte/design-system` components, classes and tokens. Don't hand-roll styles
   that it should own; if something is missing, flag it and add it to
-  `dbateson/whyte-design-system` (with its reference-page card) rather than building it here.
+  `syntaxion-co/whyte-design-system` (with its reference-page card) rather than building it here.
 - The design system has no base stylesheet: each root layout puts `ds-body` on `<body>`.
 - To update it: in the design-system repo run `npm pack`, and save the tarball in `vendor/` as
   `whyte-design-system-<version>-<design-system commit>.tgz`, removing the old one. Then
